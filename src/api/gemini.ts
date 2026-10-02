@@ -75,6 +75,43 @@ export async function testConnection(apiKey: string): Promise<ConnectionTestResu
   }
 }
 
+export function extractVoiceId(data: any): string {
+  if (!data) return '';
+  const item = Array.isArray(data) ? data[0] : data;
+  if (!item || typeof item !== 'object') return '';
+
+  // 1. Direct fields
+  if (item.voice_id) return item.voice_id;
+  if (item.voiceId) return item.voiceId;
+  if (item.voice_key) return item.voice_key;
+  if (item.voiceKey) return item.voiceKey;
+  if (item.key) return item.key;
+  if (item.id && typeof item.id === 'string' && (item.id.startsWith('voice_') || item.id.startsWith('voicekey_'))) {
+    return item.id;
+  }
+
+  // 2. Nested voice object (Google REST API standard format)
+  const v = item.voice || item.replicated_voice || item.replicatedVoice;
+  if (v && typeof v === 'object') {
+    if (v.voice_id) return v.voice_id;
+    if (v.voiceId) return v.voiceId;
+    if (v.voice_key) return v.voice_key;
+    if (v.voiceKey) return v.voiceKey;
+    if (v.key) return v.key;
+    if (v.id) return v.id;
+    if (v.name && typeof v.name === 'string') {
+      return v.name.replace(/^voices\//, '');
+    }
+  }
+
+  // 3. Top-level name field (e.g. "voices/voice_...")
+  if (item.name && typeof item.name === 'string') {
+    return item.name.replace(/^voices\//, '');
+  }
+
+  return '';
+}
+
 /**
  * Voice Replication (Voice Cloning)
  * Calls POST /v1beta/voices with source_audio and consent_audio
@@ -109,27 +146,63 @@ export async function createReplicatedVoice(
   const res = await apiFetch(`/v1beta/voices?key=${encodeURIComponent(apiKey)}`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      'x-goog-api-key': apiKey.trim()
     },
     body: JSON.stringify(requestBody)
   });
 
   if (!res.ok) {
-    const errJson = await res.json().catch(() => ({}));
-    throw new Error(errJson?.error?.message || `创建声线失败 HTTP ${res.status}: ${res.statusText}`);
+    const errText = await res.text().catch(() => '');
+    let errJson: any = null;
+    try {
+      errJson = JSON.parse(errText);
+    } catch {}
+
+    const rawMsg = errJson?.error?.message || errText || `HTTP ${res.status}`;
+    let detailMsg = '';
+    if (Array.isArray(errJson?.error?.details)) {
+      for (const d of errJson.error.details) {
+        if (d.metadata?.original_error) {
+          detailMsg += ` [${d.metadata.original_error}]`;
+        } else if (d.message) {
+          detailMsg += ` [${d.message}]`;
+        }
+      }
+    }
+
+    if (
+      rawMsg.includes('Error translating server response to JSON') ||
+      detailMsg.includes('Consent flow failed') ||
+      rawMsg.includes('Consent flow failed')
+    ) {
+      throw new Error(
+        'Google 官方声纹授权校验失败（Consent Flow Failed）：\n' +
+        '1.【声纹不匹配】：参考音频与授权录音必须由同一真实说话人发音！Google 云端会强制做双轨声纹生物特征比对，严禁上传他人录音（如网络音频、动漫、他人素材）而自己读授权，否则 Google 将拒绝克隆。\n' +
+        '2.【文案必须字字准确】：授权录音必须一字不差完整朗读指定法定声明（中文：「我是此声音的拥有者并授权谷歌使用此声音创建语音合成模型」），不能改字、漏字或提前截断。\n' +
+        '3.【音质与录制时长】：参考音频建议 10 至 30 秒，授权录音至少 3 至 5 秒，录音请保持安静、无背景音乐干扰。'
+      );
+    }
+
+    throw new Error(`创建声线失败：${rawMsg}${detailMsg}`);
   }
 
   const data = await res.json();
-  const rawId = data.voice_id || data.voice?.voice_id || data.voice_key || data.name?.replace('voices/', '') || data.voice?.name?.replace('voices/', '') || `voice_${Date.now()}`;
+  const rawId = extractVoiceId(data);
+  if (!rawId) {
+    console.error('Google voices.create returned payload without voice ID:', data);
+    throw new Error(`Google 声线创建已成功响应，但未能解析到有效的 voice ID。原始返回内容: ${JSON.stringify(data)}`);
+  }
+
   const rawName = data.name || data.voice?.name || `voices/${rawId}`;
-  const rawDisplayName = payload.displayName.trim() || data.display_name || data.voice?.display_name || '自定义克隆声线';
+  const rawDisplayName = payload.displayName.trim() || data.display_name || data.displayName || data.voice?.display_name || data.voice?.displayName || '自定义克隆声线';
 
   return {
     id: rawId,
     name: rawName,
     displayName: rawDisplayName,
     type: 'replicated',
-    createTime: data.create_time || data.voice?.create_time || new Date().toISOString(),
+    createTime: data.create_time || data.createTime || data.voice?.create_time || new Date().toISOString(),
     tags: payload.tags || ['克隆声线', '专属声纹']
   };
 }
@@ -142,7 +215,11 @@ export async function listReplicatedVoices(apiKey: string): Promise<VoiceItem[]>
 
   try {
     const res = await apiFetch(`/v1beta/voices?key=${encodeURIComponent(apiKey)}`, {
-      method: 'GET'
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey.trim()
+      }
     });
 
     if (!res.ok) {
@@ -151,21 +228,26 @@ export async function listReplicatedVoices(apiKey: string): Promise<VoiceItem[]>
     }
 
     const data = await res.json();
-    const rawList = data.voices || [];
+    const rawList = Array.isArray(data)
+      ? (Array.isArray(data[0]?.voices) ? data[0].voices : data)
+      : (Array.isArray(data.voices) ? data.voices : []);
 
     return rawList
-      .filter((v: { type?: string }) => v.type === 'replicated')
-      .map((v: { name?: string; voice_id?: string; display_name?: string; create_time?: string }) => {
-        const id = v.voice_id || v.name?.replace('voices/', '') || '';
+      .map((v: any) => {
+        const item = v.voice || v;
+        const id = extractVoiceId(item);
+        if (!id) return null;
+        const displayName = item.display_name || item.displayName || item.name || id;
         return {
           id,
-          name: v.name || `voices/${id}`,
-          displayName: v.display_name || id,
+          name: item.name || `voices/${id}`,
+          displayName: displayName,
           type: 'replicated' as const,
-          createTime: v.create_time,
+          createTime: item.create_time || item.createTime || new Date().toISOString(),
           tags: ['云端同步', '克隆声线']
         };
-      });
+      })
+      .filter((v: VoiceItem | null): v is VoiceItem => v !== null);
   } catch (err) {
     console.warn('Failed to list remote voices', err);
     return [];
@@ -270,9 +352,62 @@ export async function directScriptWithLLM(
   }
 }
 
+function extractAudioFromInteractionsData(data: any): string {
+  if (!data) return '';
+  const list = Array.isArray(data) ? data : [data];
+
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue;
+
+    // 1. Direct output_audio field
+    if (item.output_audio?.data) {
+      return item.output_audio.data;
+    }
+
+    // 2. steps array with model_output
+    if (Array.isArray(item.steps)) {
+      for (const step of item.steps) {
+        if (Array.isArray(step.content)) {
+          for (const c of step.content) {
+            if ((c.type === 'audio' || c.mime_type?.startsWith('audio/')) && c.data) {
+              return c.data;
+            }
+          }
+        }
+      }
+    }
+
+    // 3. content array directly on item
+    if (Array.isArray(item.content)) {
+      for (const c of item.content) {
+        if ((c.type === 'audio' || c.mime_type?.startsWith('audio/')) && c.data) {
+          return c.data;
+        }
+      }
+    }
+
+    // 4. candidates format
+    if (Array.isArray(item.candidates)) {
+      for (const cand of item.candidates) {
+        const parts = cand?.content?.parts;
+        if (Array.isArray(parts)) {
+          for (const p of parts) {
+            if (p.inlineData?.data) {
+              return p.inlineData.data;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return '';
+}
+
 /**
  * Speech Synthesis using Gemini 3.8 Flash TTS
- * Supports both /v1beta/interactions and generateContent fallback
+ * Primary: /v1beta/interactions (native support for custom replicated voices and 3.8 Flash TTS)
+ * Secondary: /v1beta/models/...:generateContent (for prebuilt studio voices)
  */
 export async function synthesizeSpeech(
   apiKey: string,
@@ -286,126 +421,133 @@ export async function synthesizeSpeech(
     ? payload.voiceId.replace('voices/', '') 
     : payload.voiceId;
 
+  const isCustomVoice = voiceTarget.startsWith('voice_') || voiceTarget.startsWith('voicekey_');
+
   // Attempt 1: Standard Interactions API
-  try {
-    const interactionBody = {
-      model,
-      input: [
-        {
-          type: 'user_input',
-          content: [
-            {
-              type: 'text',
-              text: payload.text,
-              ...(payload.stylePrompt ? {
-                annotations: [
-                  {
-                    type: 'speech_metadata',
-                    style: payload.stylePrompt
-                  }
-                ]
-              } : {})
-            }
-          ]
-        }
-      ],
-      response_format: { type: 'audio' },
-      generation_config: {
-        speech_config: [
+  const interactionBody = {
+    model,
+    input: [
+      {
+        type: 'user_input',
+        content: [
           {
-            voice: voiceTarget
+            type: 'text',
+            text: payload.text,
+            ...(payload.stylePrompt ? {
+              annotations: [
+                {
+                  type: 'speech_metadata',
+                  style: payload.stylePrompt
+                }
+              ]
+            } : {})
           }
         ]
       }
-    };
-
-    const res = await apiFetch(`/v1beta/interactions?key=${encodeURIComponent(apiKey)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(interactionBody)
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      let audioBase64 = '';
-
-      if (data.output_audio?.data) {
-        audioBase64 = data.output_audio.data;
-      } else if (Array.isArray(data.steps)) {
-        for (const step of data.steps) {
-          if (step.type === 'model_output' && Array.isArray(step.content)) {
-            for (const item of step.content) {
-              if (item.type === 'audio' && item.data) {
-                audioBase64 = item.data;
-                break;
-              }
-            }
-          }
-          if (audioBase64) break;
-        }
-      }
-
-      if (audioBase64) {
-        const duration = await calculateAudioDuration(audioBase64);
-        return { audioBase64, duration };
-      }
-    }
-  } catch (err) {
-    console.warn('Interactions API call encountered error, attempting generateContent fallback', err);
-  }
-
-  // Attempt 2: generateContent Endpoint Fallback
-  const isCustomVoice = voiceTarget.startsWith('voice_') || voiceTarget.startsWith('voicekey_');
-  const generateBody: Record<string, any> = {
-    contents: [
-      {
-        parts: [{ text: payload.text }]
-      }
     ],
-    generationConfig: {
-      responseModalities: ['AUDIO'],
-      speechConfig: isCustomVoice
-        ? [
-            {
-              voice: voiceTarget
-            }
-          ]
-        : {
-            voiceConfig: {
-              prebuiltVoiceConfig: {
-                voiceName: voiceTarget
-              }
-            }
-          }
+    response_format: {
+      type: 'audio',
+      mime_type: 'audio/wav'
     },
-    ...(payload.stylePrompt ? {
-      systemInstruction: {
-        parts: [{ text: `Speech delivery style: ${payload.stylePrompt}` }]
-      }
-    } : {})
+    generation_config: {
+      speech_config: [
+        {
+          voice: voiceTarget
+        }
+      ]
+    }
   };
 
-  const genRes = await apiFetch(`/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+  const res = await apiFetch(`/v1beta/interactions?key=${encodeURIComponent(apiKey)}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(generateBody)
+    headers: {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': apiKey.trim()
+    },
+    body: JSON.stringify(interactionBody)
   });
 
-  if (!genRes.ok) {
-    const errJson = await genRes.json().catch(() => ({}));
-    throw new Error(errJson?.error?.message || `语音合成失败 HTTP ${genRes.status}: ${genRes.statusText}`);
+  if (res.ok) {
+    const rawText = await res.text();
+    let data: any = null;
+    try {
+      data = JSON.parse(rawText);
+    } catch {}
+
+    const audioBase64 = extractAudioFromInteractionsData(data);
+    if (audioBase64) {
+      const duration = await calculateAudioDuration(audioBase64);
+      return { audioBase64, duration };
+    }
+    console.warn('Interactions response received but failed to extract audio:', rawText);
+  } else {
+    const errText = await res.text().catch(() => '');
+    let errJson: any = null;
+    try {
+      errJson = JSON.parse(errText);
+    } catch {}
+
+    const errMsg = Array.isArray(errJson)
+      ? (errJson[0]?.error?.message || errText)
+      : (errJson?.error?.message || errText || `HTTP ${res.status}: ${res.statusText}`);
+
+    // If it's a custom cloned voice, generateContent does not support it. Throw immediately.
+    if (isCustomVoice) {
+      throw new Error(`语音合成失败（Interactions API）：${errMsg}`);
+    }
+    console.warn('Interactions API call failed, trying generateContent fallback for prebuilt voice:', errMsg);
   }
 
-  const genData = await genRes.json();
-  const part = genData?.candidates?.[0]?.content?.parts?.[0];
-  const audioBase64 = part?.inlineData?.data;
+  // Attempt 2: generateContent Endpoint Fallback (ONLY for prebuilt Studio voices)
+  if (!isCustomVoice) {
+    const generateBody: Record<string, any> = {
+      contents: [
+        {
+          parts: [{ text: payload.text }]
+        }
+      ],
+      generationConfig: {
+        responseModalities: ['AUDIO'],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: {
+              voiceName: voiceTarget
+            }
+          }
+        }
+      },
+      ...(payload.stylePrompt ? {
+        systemInstruction: {
+          parts: [{ text: `Speech delivery style: ${payload.stylePrompt}` }]
+        }
+      } : {})
+    };
 
-  if (!audioBase64) {
-    throw new Error('未收到有效的音频合成数据');
+    const genRes = await apiFetch(`/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey.trim()
+      },
+      body: JSON.stringify(generateBody)
+    });
+
+    if (!genRes.ok) {
+      const errJson = await genRes.json().catch(() => ({}));
+      throw new Error(errJson?.error?.message || `语音合成失败 HTTP ${genRes.status}: ${genRes.statusText}`);
+    }
+
+    const genData = await genRes.json();
+    const part = genData?.candidates?.[0]?.content?.parts?.[0];
+    const audioBase64 = part?.inlineData?.data;
+
+    if (audioBase64) {
+      const duration = await calculateAudioDuration(audioBase64);
+      return { audioBase64, duration };
+    }
   }
 
-  const duration = await calculateAudioDuration(audioBase64);
-  return { audioBase64, duration };
+  throw new Error('未收到有效的音频合成数据，请检查声线配置或网络状态');
 }
 
 /**

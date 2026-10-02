@@ -29,11 +29,17 @@ export function useVoiceStore() {
         ]);
         if (!mounted) return;
         setSettings(loadedSettings);
-        setVoices(loadedVoices);
+
+        // Sanitize legacy dummy timestamp voices (e.g. voice_1750012541213)
+        const sanitizedVoices = loadedVoices.filter(v => !/^voice_\d{10,}$/.test(v.id));
+        if (sanitizedVoices.length !== loadedVoices.length) {
+          storage.saveCustomVoices(sanitizedVoices);
+        }
+
+        setVoices(sanitizedVoices);
         setHistory(loadedHistory);
-        if (loadedVoices.length > 0) {
-          // If previous selection exists in list, keep it; else first voice
-          setSelectedVoiceId(loadedVoices[0].id);
+        if (sanitizedVoices.length > 0) {
+          setSelectedVoiceId(sanitizedVoices[0].id);
         }
       } catch (err) {
         console.error('Failed to initialize voice store', err);
@@ -55,14 +61,15 @@ export function useVoiceStore() {
     });
   }, []);
 
-  const syncCloudVoices = useCallback(async () => {
-    if (!settings.apiKey) return;
+  const syncCloudVoices = useCallback(async (): Promise<{ count: number; error?: string }> => {
+    if (!settings.apiKey) return { count: 0, error: '请先在设置中填写 Gemini API Key' };
     setIsSyncing(true);
     try {
       const cloudVoices = await listReplicatedVoices(settings.apiKey);
+      let count = 0;
       setVoices(prev => {
-        // Merge cloud voices with local voices (preserving local custom nicknames & sample paths)
-        const currentCustom = prev.filter(v => v.type === 'replicated');
+        // Filter out legacy dummy timestamp voices
+        const currentCustom = prev.filter(v => v.type === 'replicated' && !/^voice_\d{10,}$/.test(v.id));
         const customMap = new Map(currentCustom.map(v => [v.id, v]));
 
         cloudVoices.forEach(cv => {
@@ -84,10 +91,13 @@ export function useVoiceStore() {
         const presets = prev.filter(v => v.type === 'preset');
         const allVoices = [...presets, ...mergedCustom];
         storage.saveCustomVoices(allVoices);
+        count = cloudVoices.length;
         return allVoices;
       });
-    } catch (err) {
+      return { count };
+    } catch (err: any) {
       console.error('Failed to sync cloud voices', err);
+      return { count: 0, error: err?.message || String(err) };
     } finally {
       setIsSyncing(false);
     }

@@ -14,7 +14,8 @@ import {
   Download,
   AlertCircle,
   Loader2,
-  CheckCircle2
+  CheckCircle2,
+  X
 } from 'lucide-react';
 import { useVoiceStore } from './hooks/useVoiceStore';
 import { WaveformPlayer } from './components/WaveformPlayer';
@@ -96,6 +97,9 @@ export function App() {
   const [isCloneModalOpen, setIsCloneModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
+  // Sync status message
+  const [syncMessage, setSyncMessage] = useState<{ type: 'success' | 'info' | 'error'; text: string } | null>(null);
+
   // Voice repo filter & search
   const [repoFilter, setRepoFilter] = useState<'all' | 'replicated' | 'preset' | 'favorite'>('all');
   const [repoSearch, setRepoSearch] = useState('');
@@ -104,6 +108,22 @@ export function App() {
   const [historySearch, setHistorySearch] = useState('');
 
   const currentVoice = voices.find(v => v.id === selectedVoiceId) || voices[0];
+
+  const handleSyncVoices = async () => {
+    if (!settings.apiKey) {
+      setIsSettingsModalOpen(true);
+      return;
+    }
+    setSyncMessage(null);
+    const result = await syncCloudVoices();
+    if (result.error) {
+      setSyncMessage({ type: 'error', text: `同步失败: ${result.error}` });
+    } else if (result.count > 0) {
+      setSyncMessage({ type: 'success', text: `成功从 Google 云端同步 ${result.count} 条真实声线！已自动剔除无效历史占位。` });
+    } else {
+      setSyncMessage({ type: 'info', text: 'Google 云端暂未查询到已保存的克隆声线，请录制并克隆新声线。已自动清理本地无效占位。' });
+    }
+  };
 
   // Quick insertion of vocal tags
   const insertTag = (tag: string) => {
@@ -354,12 +374,12 @@ export function App() {
           <div className="flex items-center gap-2">
             {activeTab === 'repository' && (
               <button
-                onClick={syncCloudVoices}
+                onClick={handleSyncVoices}
                 disabled={isSyncing || !settings.apiKey}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-300 border border-slate-700 transition"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-300 border border-slate-700 transition disabled:opacity-50"
               >
-                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-                <span>{isSyncing ? '正在拉取云端...' : '刷新云端声线'}</span>
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-indigo-400' : ''}`} />
+                <span>{isSyncing ? '正在拉取云端...' : '从云端同步声线'}</span>
               </button>
             )}
 
@@ -639,6 +659,32 @@ export function App() {
         {/* Tab 2: Voice Repository */}
         {activeTab === 'repository' && (
           <div className="flex-1 overflow-y-auto p-6 space-y-5">
+            {/* Sync Feedback Message */}
+            {syncMessage && (
+              <div
+                className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 text-xs shadow-md transition-all ${
+                  syncMessage.type === 'success'
+                    ? 'bg-emerald-950/40 border-emerald-800/80 text-emerald-200'
+                    : syncMessage.type === 'error'
+                    ? 'bg-rose-950/40 border-rose-800/80 text-rose-200'
+                    : 'bg-indigo-950/40 border-indigo-800/80 text-indigo-200'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  {syncMessage.type === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />}
+                  {syncMessage.type === 'error' && <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />}
+                  {syncMessage.type === 'info' && <Sparkles className="w-4 h-4 text-indigo-400 flex-shrink-0" />}
+                  <span>{syncMessage.text}</span>
+                </div>
+                <button
+                  onClick={() => setSyncMessage(null)}
+                  className="p-1 rounded hover:bg-white/10 transition text-slate-400 hover:text-white"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
             {/* Filter and Search Bar */}
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
               {/* Type Filters */}

@@ -201,16 +201,17 @@ export function CloneModal({ isOpen, onClose, onCloneSubmit }: CloneModalProps) 
           </div>
 
           {/* Compliance & Safety Warning */}
-          <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 flex items-start gap-2.5 text-xs text-slate-400">
-            <AlertCircle className="w-4 h-4 text-indigo-400 flex-shrink-0 mt-0.5" />
+          <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-2.5 text-xs text-amber-200/90 leading-relaxed">
+            <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
             <div>
-              Google Gemini 语音复刻要求参考音频与授权录音为同一真实说话人。
-              生成的音频将自动植入 SynthID 数字水印以确保安全溯源。
+              <span className="font-semibold text-amber-300">【Google 声纹校验要求】</span>：
+              参考音频与授权录音必须由<span className="text-white underline underline-offset-2">同一说话人</span>录制（云端强制比对声纹特征）。
+              授权词必须一字不差完整朗读，不可漏字改字或提前掐断。
             </div>
           </div>
 
           {submitError && (
-            <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-800/60 text-xs text-rose-300">
+            <div className="p-3.5 rounded-xl bg-rose-950/60 border border-rose-800/80 text-xs text-rose-200 whitespace-pre-line leading-relaxed shadow-lg">
               {submitError}
             </div>
           )}
