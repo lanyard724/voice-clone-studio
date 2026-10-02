@@ -1,5 +1,5 @@
-import { useRef } from 'react';
-import { Mic, Square, Upload, Play, Pause, Trash2, CheckCircle2 } from 'lucide-react';
+import { useRef, useState, useEffect, ChangeEvent } from 'react';
+import { Mic, Square, Upload, Play, Pause, Trash2, CheckCircle2, Loader2 } from 'lucide-react';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
 import { formatAudioTime } from '../utils/audioConverter';
 
@@ -12,6 +12,7 @@ interface AudioRecorderProps {
   onClear: () => void;
   isReady: boolean;
   readyDuration?: number;
+  readyDataUrl?: string;
 }
 
 export function AudioRecorder({
@@ -22,12 +23,15 @@ export function AudioRecorder({
   onAudioReady,
   onClear,
   isReady,
-  readyDuration = 0
+  readyDuration = 0,
+  readyDataUrl
 }: AudioRecorderProps) {
   const {
     isRecording,
+    isConverting,
     duration,
     volume,
+    audioBase64,
     dataUrl,
     error,
     startRecording,
@@ -38,14 +42,8 @@ export function AudioRecorder({
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const audioPreviewRef = useRef<HTMLAudioElement | null>(null);
-  const [isPlayingPreview, setIsPlayingPreview] = React.useState(false);
-
-  // When recorder completes and dataUrl is generated
-  React.useEffect(() => {
-    if (dataUrl) {
-      // Audio ready
-    }
-  }, [dataUrl]);
+  const [isPlayingPreview, setIsPlayingPreview] = useState(false);
+  const lastReportedBase64Ref = useRef<string | null>(null);
 
   const handleStart = async () => {
     await startRecording();
@@ -55,28 +53,22 @@ export function AudioRecorder({
     stopRecording();
   };
 
-  // Watch for when recording finishes and passes to parent
-  React.useEffect(() => {
-    if (!isRecording && dataUrl && duration > 0) {
-      // Fetch base64 from audio data
-      fetch(dataUrl)
-        .then(res => res.blob())
-        .then(async blob => {
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            const base64data = (reader.result as string).split(',')[1];
-            onAudioReady(base64data, duration, dataUrl);
-          };
-          reader.readAsDataURL(blob);
-        });
+  // Watch for when recording finishes and passes to parent, guarded against re-render loops
+  useEffect(() => {
+    if (!isRecording && !isConverting && audioBase64 && dataUrl && duration > 0) {
+      if (lastReportedBase64Ref.current !== audioBase64) {
+        lastReportedBase64Ref.current = audioBase64;
+        onAudioReady(audioBase64, duration, dataUrl);
+      }
     }
-  }, [isRecording, dataUrl, duration, onAudioReady]);
+  }, [isRecording, isConverting, audioBase64, dataUrl, duration, onAudioReady]);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
       const converted = await loadFileAudio(file);
+      lastReportedBase64Ref.current = converted.base64;
       onAudioReady(converted.base64, converted.duration, converted.dataUrl);
     } catch (err) {
       console.error(err);
@@ -84,6 +76,7 @@ export function AudioRecorder({
   };
 
   const handleClear = () => {
+    lastReportedBase64Ref.current = null;
     resetRecording();
     onClear();
     if (fileInputRef.current) {
@@ -107,6 +100,7 @@ export function AudioRecorder({
   const isTooShort = currentDuration > 0 && currentDuration < minDuration;
   const isOptimal = currentDuration >= minDuration && currentDuration <= maxDuration;
   const isTooLong = currentDuration > maxDuration;
+  const activePreviewUrl = dataUrl || readyDataUrl;
 
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 transition-all hover:border-slate-700">
@@ -159,8 +153,16 @@ export function AudioRecorder({
         </div>
       )}
 
+      {/* Converting feedback */}
+      {isConverting && (
+        <div className="mb-3 p-2.5 rounded-lg bg-indigo-950/30 border border-indigo-800/50 flex items-center gap-2 text-xs text-indigo-300">
+          <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+          <span>正在进行 24kHz 单声道 16-bit PCM 音频重采样标准化...</span>
+        </div>
+      )}
+
       {/* Duration status tag */}
-      {currentDuration > 0 && !isRecording && (
+      {currentDuration > 0 && !isRecording && !isConverting && (
         <div className="mb-2 text-xs">
           {isOptimal && (
             <span className="text-emerald-400">✓ 时长符合最佳标准（{currentDuration.toFixed(1)} 秒）</span>
@@ -182,7 +184,7 @@ export function AudioRecorder({
 
       {/* Operation Actions */}
       <div className="flex items-center gap-2 mt-2">
-        {!isReady && !isRecording && (
+        {!isReady && !isRecording && !isConverting && (
           <>
             <button
               onClick={handleStart}
@@ -218,19 +220,20 @@ export function AudioRecorder({
           </button>
         )}
 
-        {isReady && (
+        {isReady && !isConverting && (
           <div className="flex-1 flex items-center gap-2">
-            {dataUrl && (
+            {activePreviewUrl && (
               <audio
                 ref={audioPreviewRef}
-                src={dataUrl}
+                src={activePreviewUrl}
                 onEnded={() => setIsPlayingPreview(false)}
                 className="hidden"
               />
             )}
             <button
               onClick={togglePreview}
-              className="flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-xs font-medium transition"
+              disabled={!activePreviewUrl}
+              className="flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-xs font-medium transition disabled:opacity-50"
             >
               {isPlayingPreview ? (
                 <>
@@ -255,5 +258,3 @@ export function AudioRecorder({
     </div>
   );
 }
-
-import React from 'react';

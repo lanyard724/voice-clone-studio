@@ -90,6 +90,7 @@ export async function createReplicatedVoice(
   const requestBody = {
     store: payload.store ?? true,
     voice: {
+      model: 'gemini-3.8-flash-tts',
       type: 'replicated',
       display_name: payload.displayName.trim() || '我的克隆声线',
       replicated: {
@@ -119,14 +120,16 @@ export async function createReplicatedVoice(
   }
 
   const data = await res.json();
-  const rawId = data.voice_id || data.name?.replace('voices/', '') || `voice_${Date.now()}`;
+  const rawId = data.voice_id || data.voice?.voice_id || data.voice_key || data.name?.replace('voices/', '') || data.voice?.name?.replace('voices/', '') || `voice_${Date.now()}`;
+  const rawName = data.name || data.voice?.name || `voices/${rawId}`;
+  const rawDisplayName = payload.displayName.trim() || data.display_name || data.voice?.display_name || '自定义克隆声线';
 
   return {
     id: rawId,
-    name: data.name || `voices/${rawId}`,
-    displayName: payload.displayName.trim() || data.display_name || '自定义克隆声线',
+    name: rawName,
+    displayName: rawDisplayName,
     type: 'replicated',
-    createTime: data.create_time || new Date().toISOString(),
+    createTime: data.create_time || data.voice?.create_time || new Date().toISOString(),
     tags: payload.tags || ['克隆声线', '专属声纹']
   };
 }
@@ -352,7 +355,8 @@ export async function synthesizeSpeech(
   }
 
   // Attempt 2: generateContent Endpoint Fallback
-  const generateBody = {
+  const isCustomVoice = voiceTarget.startsWith('voice_') || voiceTarget.startsWith('voicekey_');
+  const generateBody: Record<string, any> = {
     contents: [
       {
         parts: [{ text: payload.text }]
@@ -360,14 +364,25 @@ export async function synthesizeSpeech(
     ],
     generationConfig: {
       responseModalities: ['AUDIO'],
-      speechConfig: {
-        voiceConfig: {
-          prebuiltVoiceConfig: {
-            voiceName: voiceTarget
+      speechConfig: isCustomVoice
+        ? [
+            {
+              voice: voiceTarget
+            }
+          ]
+        : {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: voiceTarget
+              }
+            }
           }
-        }
+    },
+    ...(payload.stylePrompt ? {
+      systemInstruction: {
+        parts: [{ text: `Speech delivery style: ${payload.stylePrompt}` }]
       }
-    }
+    } : {})
   };
 
   const genRes = await apiFetch(`/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {

@@ -1,4 +1,5 @@
 import { AppSettings, VoiceItem, GenerationRecord } from '../api/types';
+import { base64ToBlob } from './audioConverter';
 
 const DEFAULT_SETTINGS: AppSettings = {
   apiKey: '',
@@ -160,7 +161,7 @@ export const storage = {
       return await window.electronAPI.exportAudio(base64, defaultName);
     }
     // Browser fallback download
-    const blob = new Blob([new Uint8Array(atob(base64).split('').map(c => c.charCodeAt(0)))], { type: 'audio/wav' });
+    const blob = base64ToBlob(base64, 'audio/wav');
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;

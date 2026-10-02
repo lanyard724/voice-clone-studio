@@ -4,6 +4,7 @@ import { convertBlobTo24kWav } from '../utils/audioConverter';
 export interface RecorderState {
   isRecording: boolean;
   isPaused: boolean;
+  isConverting: boolean;
   duration: number;
   volume: number; // 0 to 1
   audioBlob: Blob | null;
@@ -15,6 +16,7 @@ export interface RecorderState {
 export function useAudioRecorder() {
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [isConverting, setIsConverting] = useState(false);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
@@ -119,6 +121,7 @@ export function useAudioRecorder() {
       };
 
       recorder.onstop = async () => {
+        setIsConverting(true);
         const rawBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
         try {
           // Standardize to 24kHz mono 16-bit PCM WAV
@@ -131,8 +134,10 @@ export function useAudioRecorder() {
         } catch (convErr) {
           console.error('Audio standardization failed', convErr);
           setError(`音频标准化转码失败: ${convErr instanceof Error ? convErr.message : String(convErr)}`);
+        } finally {
+          setIsConverting(false);
+          cleanupAudio();
         }
-        cleanupAudio();
       };
 
       recorder.start(100);
@@ -156,6 +161,7 @@ export function useAudioRecorder() {
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && isRecording) {
+      setIsConverting(true);
       mediaRecorderRef.current.stop();
       setIsRecording(false);
       setIsPaused(false);
@@ -182,6 +188,7 @@ export function useAudioRecorder() {
     cleanupAudio();
     setIsRecording(false);
     setIsPaused(false);
+    setIsConverting(false);
     setDuration(0);
     setVolume(0);
     setAudioBlob(null);
@@ -195,6 +202,7 @@ export function useAudioRecorder() {
    */
   const loadFileAudio = useCallback(async (file: File) => {
     setError(null);
+    setIsConverting(true);
     try {
       const converted = await convertBlobTo24kWav(file);
       const wavBlob = new Blob([converted.arrayBuffer], { type: 'audio/wav' });
@@ -207,12 +215,15 @@ export function useAudioRecorder() {
       console.error('Failed to load and convert audio file', err);
       setError(`文件解析失败: ${err instanceof Error ? err.message : String(err)}`);
       throw err;
+    } finally {
+      setIsConverting(false);
     }
   }, []);
 
   return {
     isRecording,
     isPaused,
+    isConverting,
     duration,
     volume,
     audioBlob,

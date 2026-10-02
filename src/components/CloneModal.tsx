@@ -18,6 +18,7 @@ export function CloneModal({ isOpen, onClose, onCloneSubmit }: CloneModalProps) 
 
   const [consentAudioBase64, setConsentAudioBase64] = useState<string | null>(null);
   const [consentDuration, setConsentDuration] = useState(0);
+  const [consentDataUrl, setConsentDataUrl] = useState<string | null>(null);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -33,7 +34,8 @@ export function CloneModal({ isOpen, onClose, onCloneSubmit }: CloneModalProps) 
     displayName.trim() &&
     sourceAudioBase64 &&
     consentAudioBase64 &&
-    sourceDuration >= 5 // At least 5s, optimal 10-30s
+    sourceDuration >= 5 && // At least 5s, optimal 10-30s
+    consentDuration >= 2
   );
 
   const handleSubmit = async () => {
@@ -132,6 +134,7 @@ export function CloneModal({ isOpen, onClose, onCloneSubmit }: CloneModalProps) 
               maxDuration={30}
               isReady={!!sourceAudioBase64}
               readyDuration={sourceDuration}
+              readyDataUrl={sourceDataUrl || undefined}
               onAudioReady={(base64, duration, dataUrl) => {
                 setSourceAudioBase64(base64);
                 setSourceDuration(duration);
@@ -183,13 +186,16 @@ export function CloneModal({ isOpen, onClose, onCloneSubmit }: CloneModalProps) 
               recommendedText={consentText}
               isReady={!!consentAudioBase64}
               readyDuration={consentDuration}
-              onAudioReady={(base64, duration) => {
+              readyDataUrl={consentDataUrl || undefined}
+              onAudioReady={(base64, duration, dataUrl) => {
                 setConsentAudioBase64(base64);
                 setConsentDuration(duration);
+                setConsentDataUrl(dataUrl);
               }}
               onClear={() => {
                 setConsentAudioBase64(null);
                 setConsentDuration(0);
+                setConsentDataUrl(null);
               }}
             />
           </div>

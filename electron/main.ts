@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, session } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, session, net } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -66,6 +66,10 @@ let mainWindow: BrowserWindow | null = null;
 
 function applyProxy(proxyUrl?: string) {
   const target = proxyUrl && proxyUrl.trim() ? proxyUrl.trim() : 'http://127.0.0.1:7900';
+  process.env.HTTP_PROXY = target;
+  process.env.HTTPS_PROXY = target;
+  process.env.http_proxy = target;
+  process.env.https_proxy = target;
   session.defaultSession.setProxy({
     proxyRules: target
   }).then(() => {
@@ -188,9 +192,9 @@ app.whenReady().then(() => {
     return true;
   });
 
-  // Proxy-aware API fetcher in main process
+  // Proxy-aware API fetcher in main process using Chromium net.fetch
   ipcMain.handle('api-request', async (_event, { url, method = 'GET', headers = {}, body }: any) => {
-    const res = await fetch(url, {
+    const res = await net.fetch(url, {
       method,
       headers,
       body: body || undefined

@@ -64,6 +64,21 @@ export function WaveformPlayer({
     }
   }, [blobUrl, autoPlay]);
 
+  // Clean up Web Audio context on unmount to prevent hardware audio context limit exhaustion
+  useEffect(() => {
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        audioContextRef.current.close().catch(() => {});
+        audioContextRef.current = null;
+      }
+      sourceNodeRef.current = null;
+      analyserRef.current = null;
+    };
+  }, []);
+
   // Setup Web Audio Analyser for canvas animation
   const setupWebAudio = useCallback(() => {
     if (!audioRef.current || audioContextRef.current) return;

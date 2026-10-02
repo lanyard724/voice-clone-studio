@@ -25,17 +25,17 @@ export async function resampleTo24kMono(audioBuffer: AudioBuffer): Promise<Audio
 }
 
 /**
- * Converts an AudioBuffer into 16-bit signed PCM WAV ArrayBuffer
+ * Converts an AudioBuffer into 16-bit signed PCM WAV ArrayBuffer.
+ * Automatically downmixes multi-channel input to mono by averaging channels,
+ * ensuring standard 24kHz mono PCM WAV required by Gemini Voice Replication.
  */
 export function encodeWAV(audioBuffer: AudioBuffer): ArrayBuffer {
-  const numChannels = audioBuffer.numberOfChannels;
+  const numChannels = TARGET_CHANNELS; // Force 1 channel (mono)
   const sampleRate = audioBuffer.sampleRate;
   const format = 1; // PCM
   const bitDepth = 16;
 
-  // Interleave channels (here mono, single channel)
-  const channelData = audioBuffer.getChannelData(0);
-  const numSamples = channelData.length;
+  const numSamples = audioBuffer.length;
   const bytesPerSample = bitDepth / 8;
   const blockAlign = numChannels * bytesPerSample;
   const byteRate = sampleRate * blockAlign;
@@ -71,10 +71,22 @@ export function encodeWAV(audioBuffer: AudioBuffer): ArrayBuffer {
   // data chunk length
   view.setUint32(40, dataSize, true);
 
-  // Write 16-bit signed PCM samples with soft clipping
+  // Collect input channel data
+  const inputChannelCount = audioBuffer.numberOfChannels;
+  const channels: Float32Array[] = [];
+  for (let c = 0; c < inputChannelCount; c++) {
+    channels.push(audioBuffer.getChannelData(c));
+  }
+
+  // Write 16-bit signed PCM samples with soft clipping & downmixing
   let offset = 44;
   for (let i = 0; i < numSamples; i++) {
-    let s = channelData[i];
+    let s = 0;
+    for (let c = 0; c < inputChannelCount; c++) {
+      s += channels[c][i];
+    }
+    s = s / inputChannelCount;
+
     // Clamp to [-1, 1]
     if (s > 1) s = 1;
     else if (s < -1) s = -1;
