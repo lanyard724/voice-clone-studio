@@ -95,8 +95,11 @@ export function App() {
 
   // Audio output state
   const [generatedAudioBase64, setGeneratedAudioBase64] = useState<string | null>(null);
+  const [shouldAutoPlay, setShouldAutoPlay] = useState(false);
+  const [synthesizedVoiceName, setSynthesizedVoiceName] = useState<string | null>(null);
   const [isSynthesizing, setIsSynthesizing] = useState(false);
   const [synthesisError, setSynthesisError] = useState<string | null>(null);
+  const hasAutoSelectedVoiceRef = useRef(false);
 
   // Modals
   const [isCloneModalOpen, setIsCloneModalOpen] = useState(false);
@@ -122,26 +125,33 @@ export function App() {
 
   const currentVoice = voices.find(v => v.id === selectedVoiceId) || voices[0];
 
-  // Auto-select custom replicated voice if user has one and is still on default 'kore'
+  // One-time initial selection of custom replicated voice on startup only (never override manual user selection)
   useEffect(() => {
-    if (selectedVoiceId === 'kore' && voices.length > 0) {
-      const custom = voices.find(v => v.type === 'replicated');
-      if (custom) {
-        setSelectedVoiceId(custom.id);
+    if (!hasAutoSelectedVoiceRef.current && voices.length > 0) {
+      hasAutoSelectedVoiceRef.current = true;
+      if (selectedVoiceId === 'kore') {
+        const custom = voices.find(v => v.type === 'replicated');
+        if (custom) {
+          setSelectedVoiceId(custom.id);
+        }
       }
     }
   }, [voices, selectedVoiceId, setSelectedVoiceId]);
 
-  // Prioritize replicated voices at the top of the studio quick-select list (3 cards for balanced vertical rhythm)
-  const quickStudioVoices = [...voices]
-    .sort((a, b) => {
-      if (a.type === 'replicated' && b.type !== 'replicated') return -1;
-      if (a.type !== 'replicated' && b.type === 'replicated') return 1;
-      if (a.isFavorite && !b.isFavorite) return -1;
-      if (!a.isFavorite && b.isFavorite) return 1;
-      return 0;
-    })
-    .slice(0, 3);
+  // Prioritize replicated voices at the top of the studio quick-select list (3 cards),
+  // and always ensure the currently selected voice from the repository is visible in the 3 slots
+  const sortedVoices = [...voices].sort((a, b) => {
+    if (a.type === 'replicated' && b.type !== 'replicated') return -1;
+    if (a.type !== 'replicated' && b.type === 'replicated') return 1;
+    if (a.isFavorite && !b.isFavorite) return -1;
+    if (!a.isFavorite && b.isFavorite) return 1;
+    return 0;
+  });
+  const topThreeVoices = sortedVoices.slice(0, 3);
+  const quickStudioVoices =
+    currentVoice && !topThreeVoices.some(v => v.id === currentVoice.id)
+      ? [topThreeVoices[0], topThreeVoices[1], currentVoice].filter(Boolean)
+      : topThreeVoices;
 
   const handleSyncVoices = async () => {
     if (!settings.apiKey) {
@@ -213,6 +223,8 @@ export function App() {
       });
 
       setGeneratedAudioBase64(result.audioBase64);
+      setSynthesizedVoiceName(currentVoice?.displayName || selectedVoiceId);
+      setShouldAutoPlay(true);
 
       addHistoryRecord({
         id: `rec_${Date.now()}`,
@@ -534,13 +546,17 @@ export function App() {
               stylePrompt: styleToUse,
               model: modelToUse
             });
+            const matchedVoice = voices.find(v => v.id === voiceToUse);
+            const resolvedVoiceName = matchedVoice?.displayName || voiceToUse;
             setGeneratedAudioBase64(res.audioBase64);
+            setSynthesizedVoiceName(resolvedVoiceName);
+            setShouldAutoPlay(true);
             addHistoryRecord({
               id: `rec_${Date.now()}`,
               timestamp: Date.now(),
               text: textToUse,
               voiceId: voiceToUse,
-              voiceName: voiceToUse,
+              voiceName: resolvedVoiceName,
               stylePrompt: styleToUse,
               audioBase64: res.audioBase64,
               audioDuration: res.duration,
@@ -610,7 +626,10 @@ export function App() {
   const latestHistoryItem = history[0];
   const activeMonitorBase64 = generatedAudioBase64 || latestHistoryItem?.audioBase64 || null;
   const activeMonitorUrl = !generatedAudioBase64 ? latestHistoryItem?.audioUrl || null : null;
-  const activeMonitorTitle = `${currentVoice?.displayName || latestHistoryItem?.voiceName || '阿岚日常'} (24kHz)`;
+  const activeMonitorVoiceLabel = generatedAudioBase64
+    ? synthesizedVoiceName || currentVoice?.displayName || '阿岚日常'
+    : latestHistoryItem?.voiceName || currentVoice?.displayName || '阿岚日常';
+  const activeMonitorTitle = `${activeMonitorVoiceLabel} (24kHz)`;
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-[#F8F9FA] text-[#09090B] flex flex-col p-6 gap-5 select-none">
@@ -734,10 +753,11 @@ export function App() {
                 {quickStudioVoices.map(v => {
                   const isSel = v.id === selectedVoiceId;
                   return (
-                    <div
+                    <button
+                      type="button"
                       key={v.id}
                       onClick={() => setSelectedVoiceId(v.id)}
-                      className={`p-3 border-2 border-[#09090B] rounded-[5px] cursor-pointer transition-all ${
+                      className={`w-full text-left p-3 border-2 border-[#09090B] rounded-[5px] cursor-pointer transition-all ${
                         isSel
                           ? 'bg-[#D97706]/15 shadow-[3px_3px_0_#09090B] translate-x-[-1px] translate-y-[-1px]'
                           : 'bg-[#F8F9FA] hover:bg-[#FFFFFF] hover:shadow-[2.5px_2.5px_0_#09090B]'
@@ -761,7 +781,7 @@ export function App() {
                       <div className="font-mono text-xs font-bold text-[#09090B]/70 mt-0.5 truncate">
                         ID: {v.id} · 24kHz PCM
                       </div>
-                    </div>
+                    </button>
                   );
                 })}
               </div>
@@ -1040,11 +1060,12 @@ export function App() {
               audioUrl={activeMonitorUrl}
               title={activeMonitorTitle}
               durationHint={latestHistoryItem?.audioDuration || 29.12}
-              autoPlay={settings.autoPlay && Boolean(generatedAudioBase64)}
+              autoPlay={settings.autoPlay && shouldAutoPlay}
+              onAutoPlayHandled={() => setShouldAutoPlay(false)}
               onExport={() =>
                 handleExportWav(
                   activeMonitorBase64 || activeMonitorUrl || undefined,
-                  currentVoice?.displayName || 'voice'
+                  activeMonitorVoiceLabel || 'voice'
                 )
               }
             />

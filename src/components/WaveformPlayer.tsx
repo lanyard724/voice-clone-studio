@@ -9,6 +9,7 @@ interface WaveformPlayerProps {
   durationHint?: number;
   onExport?: () => void;
   autoPlay?: boolean;
+  onAutoPlayHandled?: () => void;
   compact?: boolean;
 }
 
@@ -29,6 +30,7 @@ export function WaveformPlayer({
   durationHint = 0,
   onExport,
   autoPlay = false,
+  onAutoPlayHandled,
   compact = false
 }: WaveformPlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -79,10 +81,11 @@ export function WaveformPlayer({
     if (audioRef.current && blobUrl) {
       audioRef.current.load();
       if (autoPlay) {
+        onAutoPlayHandled?.();
         audioRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
       }
     }
-  }, [blobUrl, autoPlay]);
+  }, [blobUrl]);
 
   useEffect(() => {
     return () => {
