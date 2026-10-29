@@ -1,65 +1,145 @@
-import { AppSettings, VoiceItem, GenerationRecord } from '../api/types';
+import {
+  AppSettings,
+  VoiceItem,
+  GenerationRecord,
+  DEFAULT_SETTINGS,
+  PRESET_VOICES
+} from '../api/types';
 import { base64ToBlob } from './audioConverter';
 
-const DEFAULT_SETTINGS: AppSettings = {
-  apiKey: '',
-  proxyUrl: 'http://127.0.0.1:7900',
-  autoPlay: true,
-  defaultModel: 'gemini-3.8-flash-tts'
-};
+const MIGRATION_KEY = 'voice_studio_migrated_v2';
 
-const PRESET_VOICES: VoiceItem[] = [
-  {
-    id: 'kore',
-    name: 'voices/kore',
-    displayName: 'Kore（沉稳端庄）',
-    type: 'preset',
-    tags: ['官方预设', '女声', '专业', '沉稳'],
-    description: '坚定、稳重、专业的新闻与纪录片音色'
-  },
-  {
-    id: 'zephyr',
-    name: 'voices/zephyr',
-    displayName: 'Zephyr（明亮欢快）',
-    type: 'preset',
-    tags: ['官方预设', '女声', '活力', '亲和'],
-    description: '明亮轻快、充满朝气的主播与助理音色'
-  },
-  {
-    id: 'puck',
-    name: 'voices/puck',
-    displayName: 'Puck（幽默随和）',
-    type: 'preset',
-    tags: ['官方预设', '男声', '风趣', '自然'],
-    description: '随和、略带幽默感的年轻男性对谈音色'
-  },
-  {
-    id: 'fenrir',
-    name: 'voices/fenrir',
-    displayName: 'Fenrir（激昂有力）',
-    type: 'preset',
-    tags: ['官方预设', '男声', '激昂', '力量'],
-    description: '富有磁性与爆发力的男性叙事音色'
-  },
-  {
-    id: 'charon',
-    name: 'voices/charon',
-    displayName: 'Charon（深邃博学）',
-    type: 'preset',
-    tags: ['官方预设', '男声', '低沉', '博学'],
-    description: '低沉内敛、极具说服力的学者与旁白音色'
-  },
-  {
-    id: 'leda',
-    name: 'voices/leda',
-    displayName: 'Leda（青春温婉）',
-    type: 'preset',
-    tags: ['官方预设', '女声', '温柔', '治愈'],
-    description: '温婉柔和、富有亲切感的年轻女性音色'
+function readLocalSettings(): Partial<AppSettings> {
+  const raw = localStorage.getItem('voice_studio_settings');
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
   }
-];
+}
+
+function readLocalCustomVoices(): VoiceItem[] {
+  const raw = localStorage.getItem('voice_studio_voices');
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function readLocalHistory(): GenerationRecord[] {
+  const raw = localStorage.getItem('voice_studio_history');
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalHistorySlim(records: GenerationRecord[]): void {
+  try {
+    const slim = records.slice(0, 100).map(r => ({
+      ...r,
+      audioBase64: '',
+      audioUrl: r.audioUrl || `/api/audio?id=${encodeURIComponent(r.id)}`
+    }));
+    localStorage.setItem('voice_studio_history', JSON.stringify(slim));
+  } catch (err) {
+    console.warn('localStorage history write skipped', err);
+  }
+}
+
+function mergeWithPresets(customVoices: VoiceItem[]): VoiceItem[] {
+  const customMap = new Map<string, VoiceItem>();
+  customVoices.forEach(v => {
+    if (v && v.id && v.type !== 'preset' && !/^voice_\d{10,}$/.test(v.id)) {
+      customMap.set(v.id, v);
+    }
+  });
+  return [...PRESET_VOICES, ...Array.from(customMap.values())];
+}
 
 export const storage = {
+  /**
+   * Single unified state loader that avoids 3x duplicate /api/state requests
+   * and uses /api/state as authoritative Single Source of Truth.
+   */
+  async loadAllState(): Promise<{
+    settings: AppSettings;
+    voices: VoiceItem[];
+    history: GenerationRecord[];
+  }> {
+    try {
+      const res = await fetch('/api/state');
+      if (res.ok) {
+        const data = await res.json();
+        const serverSettings: AppSettings = { ...DEFAULT_SETTINGS, ...(data?.settings || {}) };
+        let serverVoices: VoiceItem[] = Array.isArray(data?.voices) ? data.voices : [];
+        let serverHistory: GenerationRecord[] = Array.isArray(data?.history) ? data.history : [];
+
+        // One-time migration from browser localStorage to backend DB on very first run
+        const alreadyMigrated = localStorage.getItem(MIGRATION_KEY) === '1';
+        if (!alreadyMigrated) {
+          const localSettings = readLocalSettings();
+          const localVoices = readLocalCustomVoices();
+          const localHist = readLocalHistory();
+          let needsPush = false;
+
+          if (!serverSettings.apiKey && localSettings.apiKey) {
+            serverSettings.apiKey = localSettings.apiKey;
+            needsPush = true;
+          }
+          if (serverVoices.length === 0 && localVoices.length > 0) {
+            serverVoices = localVoices;
+            needsPush = true;
+          }
+          if (serverHistory.length === 0 && localHist.length > 0) {
+            serverHistory = localHist;
+            needsPush = true;
+          }
+          localStorage.setItem(MIGRATION_KEY, '1');
+
+          if (needsPush) {
+            await fetch('/api/state', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                settings: serverSettings,
+                voices: serverVoices,
+                history: serverHistory,
+                broadcast: false
+              })
+            }).catch(() => {});
+          }
+        }
+
+        // Authoritative sync down to localStorage (even if arrays are legitimately empty)
+        localStorage.setItem('voice_studio_settings', JSON.stringify(serverSettings));
+        localStorage.setItem('voice_studio_voices', JSON.stringify(serverVoices));
+        writeLocalHistorySlim(serverHistory);
+
+        return {
+          settings: serverSettings,
+          voices: mergeWithPresets(serverVoices),
+          history: serverHistory
+        };
+      }
+    } catch {}
+
+    // Fallback when running in standalone Electron or offline without Vite bridge
+    const [settings, voices, history] = await Promise.all([
+      this.getSettings(),
+      this.getVoices(),
+      this.getHistory()
+    ]);
+    return { settings, voices, history };
+  },
+
   async getSettings(): Promise<AppSettings> {
     if (window.electronAPI?.getSettings) {
       try {
@@ -69,13 +149,7 @@ export const storage = {
         console.warn('IPC getSettings failed, fallback to local', err);
       }
     }
-    const raw = localStorage.getItem('voice_studio_settings');
-    if (!raw) return DEFAULT_SETTINGS;
-    try {
-      return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
-    } catch {
-      return DEFAULT_SETTINGS;
-    }
+    return { ...DEFAULT_SETTINGS, ...readLocalSettings() };
   },
 
   async saveSettings(settings: Partial<AppSettings>): Promise<void> {
@@ -89,33 +163,26 @@ export const storage = {
       }
     }
     localStorage.setItem('voice_studio_settings', JSON.stringify(updated));
+    await fetch('/api/state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settings: updated, broadcast: false })
+    }).catch(() => {});
   },
 
   async getVoices(): Promise<VoiceItem[]> {
-    let customVoices: VoiceItem[] = [];
     if (window.electronAPI?.getVoices) {
       try {
-        customVoices = (await window.electronAPI.getVoices()) || [];
+        const ipcVoices = (await window.electronAPI.getVoices()) || [];
+        return mergeWithPresets(ipcVoices);
       } catch (err) {
         console.warn('IPC getVoices failed', err);
       }
     }
-    if (customVoices.length === 0) {
-      const raw = localStorage.getItem('voice_studio_voices');
-      if (raw) {
-        try {
-          customVoices = JSON.parse(raw);
-        } catch {
-          customVoices = [];
-        }
-      }
-    }
-    // Combine presets with custom voices
-    return [...PRESET_VOICES, ...customVoices];
+    return mergeWithPresets(readLocalCustomVoices());
   },
 
   async saveCustomVoices(voices: VoiceItem[]): Promise<void> {
-    // Only save replicated / custom voices
     const onlyCustom = voices.filter(v => v.type === 'replicated' || v.type === 'prompted');
     if (window.electronAPI?.saveVoices) {
       try {
@@ -125,6 +192,11 @@ export const storage = {
       }
     }
     localStorage.setItem('voice_studio_voices', JSON.stringify(onlyCustom));
+    await fetch('/api/state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voices: onlyCustom, broadcast: false })
+    }).catch(() => {});
   },
 
   async getHistory(): Promise<GenerationRecord[]> {
@@ -135,37 +207,61 @@ export const storage = {
         console.warn('IPC getHistory failed', err);
       }
     }
-    const raw = localStorage.getItem('voice_studio_history');
-    if (!raw) return [];
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return [];
-    }
+    return readLocalHistory();
   },
 
   async saveHistory(records: GenerationRecord[]): Promise<void> {
+    const sliced = records.slice(0, 100);
     if (window.electronAPI?.saveHistory) {
       try {
-        await window.electronAPI.saveHistory(records);
+        await window.electronAPI.saveHistory(sliced);
       } catch (err) {
         console.warn('IPC saveHistory failed', err);
       }
     }
-    // Retain up to 100 recent items in localStorage
-    localStorage.setItem('voice_studio_history', JSON.stringify(records.slice(0, 100)));
+    writeLocalHistorySlim(sliced);
+    await fetch('/api/state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ history: sliced, broadcast: false })
+    }).catch(() => {});
   },
 
-  async exportAudioFile(base64: string, defaultName: string): Promise<boolean> {
-    if (window.electronAPI?.exportAudio) {
-      return await window.electronAPI.exportAudio(base64, defaultName);
+  async exportAudioFile(base64OrUrl: string, defaultName: string): Promise<boolean> {
+    const downloadName = defaultName.endsWith('.wav') ? defaultName : `${defaultName}.wav`;
+
+    if (base64OrUrl.startsWith('/api/audio') || base64OrUrl.startsWith('http')) {
+      const res = await fetch(base64OrUrl);
+      if (!res.ok) return false;
+      const blob = await res.blob();
+      if (window.electronAPI?.exportAudio) {
+        const arrayBuffer = await blob.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuffer);
+        let binary = '';
+        for (let i = 0; i < bytes.byteLength; i += 8192) {
+          binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + 8192)));
+        }
+        return await window.electronAPI.exportAudio(btoa(binary), downloadName);
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = downloadName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      return true;
     }
-    // Browser fallback download
-    const blob = base64ToBlob(base64, 'audio/wav');
+
+    if (window.electronAPI?.exportAudio) {
+      return await window.electronAPI.exportAudio(base64OrUrl, downloadName);
+    }
+    const blob = base64ToBlob(base64OrUrl, 'audio/wav');
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = defaultName.endsWith('.wav') ? defaultName : `${defaultName}.wav`;
+    a.download = downloadName;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

@@ -24,6 +24,53 @@ export async function resampleTo24kMono(audioBuffer: AudioBuffer): Promise<Audio
   return await offlineCtx.startRendering();
 }
 
+export function writeWavHeaderToView(
+  view: DataView,
+  dataSize: number,
+  sampleRate = TARGET_SAMPLE_RATE,
+  numChannels = TARGET_CHANNELS,
+  bitDepth = 16
+): void {
+  const bytesPerSample = bitDepth / 8;
+  const blockAlign = numChannels * bytesPerSample;
+  const byteRate = sampleRate * blockAlign;
+
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(view, 8, 'WAVE');
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitDepth, true);
+  writeString(view, 36, 'data');
+  view.setUint32(40, dataSize, true);
+}
+
+/**
+ * Ensures a Base64 audio payload has a valid 44-byte RIFF WAV header.
+ * If raw L16 PCM is returned by generateContent, wraps it in a 24kHz 16-bit mono WAV header.
+ */
+export function ensureWavBase64(base64: string, sampleRate = TARGET_SAMPLE_RATE): string {
+  if (!base64) return '';
+  const binary = atob(base64);
+  if (binary.length >= 44 && binary.slice(0, 4) === 'RIFF' && binary.slice(8, 12) === 'WAVE') {
+    return base64;
+  }
+  const dataSize = binary.length;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  writeWavHeaderToView(view, dataSize, sampleRate, TARGET_CHANNELS, 16);
+  const bytes = new Uint8Array(buffer);
+  for (let i = 0; i < dataSize; i++) {
+    bytes[44 + i] = binary.charCodeAt(i);
+  }
+  return arrayBufferToBase64(buffer);
+}
+
 /**
  * Converts an AudioBuffer into 16-bit signed PCM WAV ArrayBuffer.
  * Automatically downmixes multi-channel input to mono by averaging channels,
@@ -32,44 +79,16 @@ export async function resampleTo24kMono(audioBuffer: AudioBuffer): Promise<Audio
 export function encodeWAV(audioBuffer: AudioBuffer): ArrayBuffer {
   const numChannels = TARGET_CHANNELS; // Force 1 channel (mono)
   const sampleRate = audioBuffer.sampleRate;
-  const format = 1; // PCM
   const bitDepth = 16;
 
   const numSamples = audioBuffer.length;
   const bytesPerSample = bitDepth / 8;
   const blockAlign = numChannels * bytesPerSample;
-  const byteRate = sampleRate * blockAlign;
   const dataSize = numSamples * blockAlign;
 
   const buffer = new ArrayBuffer(44 + dataSize);
   const view = new DataView(buffer);
-
-  // RIFF identifier
-  writeString(view, 0, 'RIFF');
-  // RIFF chunk length: 36 + dataSize
-  view.setUint32(4, 36 + dataSize, true);
-  // RIFF type
-  writeString(view, 8, 'WAVE');
-  // format chunk identifier
-  writeString(view, 12, 'fmt ');
-  // format chunk length
-  view.setUint32(16, 16, true);
-  // sample format (1 is PCM)
-  view.setUint16(20, format, true);
-  // channel count
-  view.setUint16(22, numChannels, true);
-  // sample rate
-  view.setUint32(24, sampleRate, true);
-  // byte rate
-  view.setUint32(28, byteRate, true);
-  // block align
-  view.setUint16(32, blockAlign, true);
-  // bits per sample
-  view.setUint16(34, bitDepth, true);
-  // data chunk identifier
-  writeString(view, 36, 'data');
-  // data chunk length
-  view.setUint32(40, dataSize, true);
+  writeWavHeaderToView(view, dataSize, sampleRate, numChannels, bitDepth);
 
   // Collect input channel data
   const inputChannelCount = audioBuffer.numberOfChannels;

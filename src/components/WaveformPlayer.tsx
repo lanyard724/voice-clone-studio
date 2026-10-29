@@ -6,33 +6,53 @@ interface WaveformPlayerProps {
   audioBase64?: string | null;
   audioUrl?: string | null;
   title?: string;
+  durationHint?: number;
   onExport?: () => void;
   autoPlay?: boolean;
+  compact?: boolean;
 }
+
+const NUM_BARS = 38;
+const DEFAULT_WAVE_PROFILE = Array.from({ length: NUM_BARS }, (_, i) => {
+  const v =
+    Math.sin(i * 0.48) * 0.32 +
+    Math.cos(i * 1.18) * 0.24 +
+    Math.sin(i * 2.05) * 0.14 +
+    0.54;
+  return Math.max(0.24, Math.min(0.96, v));
+});
 
 export function WaveformPlayer({
   audioBase64,
   audioUrl,
   title = '合成音频预览',
+  durationHint = 0,
   onExport,
-  autoPlay = false
+  autoPlay = false,
+  compact = false
 }: WaveformPlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
+  const [duration, setDuration] = useState(durationHint);
   const [volume, setVolume] = useState(0.9);
   const [isMuted, setIsMuted] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1.0);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [barHeights, setBarHeights] = useState<number[]>(DEFAULT_WAVE_PROFILE);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const stripRef = useRef<HTMLDivElement | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
 
-  // Generate blob URL from base64 if audioUrl not directly provided
+  useEffect(() => {
+    if (durationHint > 0 && duration === 0) {
+      setDuration(durationHint);
+    }
+  }, [durationHint, duration]);
+
   useEffect(() => {
     if (audioUrl) {
       setBlobUrl(audioUrl);
@@ -52,10 +72,10 @@ export function WaveformPlayer({
     }
   }, [audioBase64, audioUrl]);
 
-  // Reset and autoPlay when blobUrl changes
   useEffect(() => {
     setIsPlaying(false);
     setCurrentTime(0);
+    setBarHeights(DEFAULT_WAVE_PROFILE);
     if (audioRef.current && blobUrl) {
       audioRef.current.load();
       if (autoPlay) {
@@ -64,7 +84,6 @@ export function WaveformPlayer({
     }
   }, [blobUrl, autoPlay]);
 
-  // Clean up Web Audio context on unmount to prevent hardware audio context limit exhaustion
   useEffect(() => {
     return () => {
       if (animationFrameRef.current) {
@@ -79,7 +98,6 @@ export function WaveformPlayer({
     };
   }, []);
 
-  // Setup Web Audio Analyser for canvas animation
   const setupWebAudio = useCallback(() => {
     if (!audioRef.current || audioContextRef.current) return;
     try {
@@ -94,79 +112,39 @@ export function WaveformPlayer({
       analyserRef.current = analyser;
       sourceNodeRef.current = source;
     } catch (err) {
-      // AudioContext already connected or cross-origin restriction
       console.warn('AudioContext setup skipped', err);
     }
   }, []);
 
-  // Draw waveform canvas
-  const drawWaveform = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const width = canvas.width;
-    const height = canvas.height;
-    ctx.clearRect(0, 0, width, height);
-
-    const numBars = 48;
-    const barWidth = 4;
-    const barSpacing = (width - numBars * barWidth) / (numBars - 1);
-
-    let freqData: Uint8Array | null = null;
+  const updateLiveBars = useCallback(() => {
     if (analyserRef.current && isPlaying) {
-      freqData = new Uint8Array(new ArrayBuffer(analyserRef.current.frequencyBinCount));
-      analyserRef.current.getByteFrequencyData(freqData as any);
-    }
-
-    const progress = duration > 0 ? currentTime / duration : 0;
-
-    for (let i = 0; i < numBars; i++) {
-      const x = i * (barWidth + barSpacing);
-      const isPast = (i / numBars) <= progress;
-
-      let barHeight = 6;
-      if (freqData && isPlaying) {
-        const freqIdx = Math.floor((i / numBars) * freqData.length);
-        const val = freqData[freqIdx] / 255;
-        barHeight = Math.max(6, val * (height - 8));
-      } else {
-        // Static pleasant wave shape when idle
-        const sinVal = Math.sin((i / numBars) * Math.PI) * 0.7 + 0.3;
-        barHeight = Math.max(6, sinVal * (height * 0.6));
+      const freqData = new Uint8Array(analyserRef.current.frequencyBinCount);
+      analyserRef.current.getByteFrequencyData(freqData);
+      const next: number[] = [];
+      for (let i = 0; i < NUM_BARS; i++) {
+        const idx = Math.floor((i / NUM_BARS) * (freqData.length * 0.75));
+        const val = freqData[idx] / 255;
+        next.push(Math.max(0.22, Math.min(0.98, val * 0.85 + DEFAULT_WAVE_PROFILE[i] * 0.25)));
       }
-
-      const y = (height - barHeight) / 2;
-
-      // Color based on playback progress
-      if (isPast) {
-        const gradient = ctx.createLinearGradient(0, y, 0, y + barHeight);
-        gradient.addColorStop(0, '#818cf8');
-        gradient.addColorStop(1, '#4f46e5');
-        ctx.fillStyle = gradient;
-      } else {
-        ctx.fillStyle = '#334155';
-      }
-
-      ctx.beginPath();
-      ctx.roundRect(x, y, barWidth, barHeight, 2);
-      ctx.fill();
+      setBarHeights(next);
+      animationFrameRef.current = requestAnimationFrame(updateLiveBars);
+    } else {
+      setBarHeights(DEFAULT_WAVE_PROFILE);
     }
-
-    if (isPlaying) {
-      animationFrameRef.current = requestAnimationFrame(drawWaveform);
-    }
-  }, [currentTime, duration, isPlaying]);
+  }, [isPlaying]);
 
   useEffect(() => {
-    drawWaveform();
+    if (isPlaying) {
+      animationFrameRef.current = requestAnimationFrame(updateLiveBars);
+    } else {
+      setBarHeights(DEFAULT_WAVE_PROFILE);
+    }
     return () => {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [drawWaveform]);
+  }, [isPlaying, updateLiveBars]);
 
   const togglePlay = () => {
     if (!audioRef.current || !blobUrl) return;
@@ -194,23 +172,24 @@ export function WaveformPlayer({
   };
 
   const handleLoadedMetadata = () => {
-    if (audioRef.current) {
-      setDuration(audioRef.current.duration || 0);
+    if (audioRef.current && audioRef.current.duration && isFinite(audioRef.current.duration)) {
+      setDuration(audioRef.current.duration);
     }
   };
 
   const handleEnded = () => {
     setIsPlaying(false);
     setCurrentTime(0);
-    drawWaveform();
+    setBarHeights(DEFAULT_WAVE_PROFILE);
   };
 
-  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const time = parseFloat(e.target.value);
-    setCurrentTime(time);
-    if (audioRef.current) {
-      audioRef.current.currentTime = time;
-    }
+  const handleStripSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!audioRef.current || !duration || !stripRef.current) return;
+    const rect = stripRef.current.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const nextTime = ratio * duration;
+    audioRef.current.currentTime = nextTime;
+    setCurrentTime(nextTime);
   };
 
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -243,73 +222,73 @@ export function WaveformPlayer({
     }
   };
 
-  if (!blobUrl) {
-    return (
-      <div className="h-28 rounded-xl border border-dashed border-slate-800 bg-slate-900/40 flex items-center justify-center text-slate-500 text-sm">
-        暂无音频，输入文本并点击「生成语音」后在此播放
-      </div>
-    );
-  }
+  const effectiveDuration = duration || durationHint || 0;
+  const progressRatio = effectiveDuration > 0 ? Math.min(1, currentTime / effectiveDuration) : 0;
 
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-4 shadow-xl backdrop-blur-sm">
-      {/* Audio element */}
-      <audio
-        ref={audioRef}
-        src={blobUrl}
-        onTimeUpdate={handleTimeUpdate}
-        onLoadedMetadata={handleLoadedMetadata}
-        onEnded={handleEnded}
-      />
-
-      {/* Header and Title */}
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <h4 className="text-sm font-medium text-slate-200 truncate max-w-xs">{title}</h4>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={cycleSpeed}
-            title="切换播放倍速"
-            className="text-xs px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 font-mono transition"
-          >
-            {playbackRate}×
-          </button>
-          {onExport && (
-            <button
-              onClick={onExport}
-              title="导出高质量 WAV 文件"
-              className="flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-indigo-600/80 hover:bg-indigo-600 text-white font-medium transition shadow-sm"
-            >
-              <Download className="w-3.5 h-3.5" />
-              导出 WAV
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Canvas Waveform Display */}
-      <div className="relative w-full h-14 bg-slate-950/80 rounded-lg overflow-hidden border border-slate-800/80 my-2">
-        <canvas
-          ref={canvasRef}
-          width={600}
-          height={56}
-          className="w-full h-full block"
+    <div className={`${compact ? 'brutal-card p-4' : 'brutal-box px-5 py-4'} flex items-center gap-5 bg-[#FFFFFF]`}>
+      {blobUrl && (
+        <audio
+          ref={audioRef}
+          src={blobUrl}
+          onTimeUpdate={handleTimeUpdate}
+          onLoadedMetadata={handleLoadedMetadata}
+          onEnded={handleEnded}
         />
+      )}
+
+      {/* Square Brutalist Play Button */}
+      <button
+        onClick={togglePlay}
+        disabled={!blobUrl}
+        className={`${compact ? 'w-12 h-12' : 'w-14 h-14'} brutal-btn-amber flex items-center justify-center flex-shrink-0 disabled:opacity-40 ${
+          isPlaying ? 'animate-tube-pulse' : ''
+        }`}
+        title={isPlaying ? '暂停播放' : '播放母带'}
+      >
+        {isPlaying ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 fill-current ml-0.5" />}
+      </button>
+
+      {/* Center Vector Waveform Strip */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between gap-4 mb-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="inline-block w-2.5 h-2.5 bg-[#D97706] border-[1.5px] border-[#09090B] flex-shrink-0" />
+            <span className="font-mono text-sm font-black text-[#09090B] truncate">
+              04 // TUBE MONITOR · {blobUrl ? title : '24kHz 矢量声波监听'}
+            </span>
+          </div>
+          <div className="font-mono text-sm font-black text-[#D97706] flex-shrink-0">
+            {formatAudioTime(currentTime)} / {formatAudioTime(effectiveDuration)}
+          </div>
+        </div>
+
+        {/* 100% Vector DOM Waveform Strip (Zero Canvas Blur!) */}
+        <div
+          ref={stripRef}
+          onClick={handleStripSeek}
+          className="w-full h-11 px-3 py-1.5 bg-[#F8F9FA] border-2 border-[#09090B] rounded-[5px] flex items-center justify-between gap-[5px] cursor-pointer"
+          title="点击任意声波位置定位播放进度"
+        >
+          {barHeights.map((ratio, idx) => {
+            const barPos = (idx + 0.5) / NUM_BARS;
+            const isPlayed = progressRatio > 0 ? barPos <= progressRatio : idx < 15;
+            const heightPx = Math.max(8, Math.round(ratio * 28));
+            return (
+              <div
+                key={idx}
+                style={{ height: `${heightPx}px` }}
+                className={`flex-1 border-[1.5px] border-[#09090B] rounded-[1px] transition-all duration-100 ${
+                  isPlayed ? 'bg-[#D97706]' : 'bg-[#FFFFFF]'
+                }`}
+              />
+            );
+          })}
+        </div>
       </div>
 
-      {/* Controls & Timeline */}
-      <div className="flex items-center gap-3 mt-3">
-        {/* Play/Pause Button */}
-        <button
-          onClick={togglePlay}
-          className="w-10 h-10 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center transition shadow-lg shadow-indigo-600/20 flex-shrink-0"
-        >
-          {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
-        </button>
-
-        {/* Reset Button */}
+      {/* Right Hardware Controls */}
+      <div className="flex items-center gap-2.5 flex-shrink-0">
         <button
           onClick={() => {
             if (audioRef.current) {
@@ -317,49 +296,49 @@ export function WaveformPlayer({
               setCurrentTime(0);
             }
           }}
-          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition"
+          disabled={!blobUrl}
+          className="brutal-btn p-2.5 disabled:opacity-40"
           title="重置到开头"
         >
           <RotateCcw className="w-4 h-4" />
         </button>
 
-        {/* Time Progress Slider */}
-        <div className="flex-1 flex items-center gap-2">
-          <span className="text-xs font-mono text-slate-400 w-10 text-right">
-            {formatAudioTime(currentTime)}
-          </span>
-          <input
-            type="range"
-            min={0}
-            max={duration || 1}
-            step={0.01}
-            value={currentTime}
-            onChange={handleSeek}
-            className="flex-1 h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-          />
-          <span className="text-xs font-mono text-slate-500 w-10">
-            {formatAudioTime(duration)}
-          </span>
-        </div>
+        <button
+          onClick={cycleSpeed}
+          title="切换播放倍速"
+          className="brutal-btn px-3 py-2 text-sm font-mono font-black"
+        >
+          {playbackRate}×
+        </button>
 
-        {/* Volume controls */}
-        <div className="flex items-center gap-1.5 flex-shrink-0 pl-2 border-l border-slate-800">
+        {!compact && (
+          <div className="hidden xl:flex items-center gap-2 px-3 py-2 border-2 border-[#09090B] bg-[#F8F9FA] rounded-[5px]">
+            <button onClick={toggleMute} className="text-[#09090B] hover:text-[#D97706] transition">
+              {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={isMuted ? 0 : volume}
+              onChange={handleVolumeChange}
+              className="w-16 brutal-range"
+            />
+          </div>
+        )}
+
+        {onExport && (
           <button
-            onClick={toggleMute}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition"
+            onClick={onExport}
+            disabled={!blobUrl}
+            title="导出 24kHz WAV 文件"
+            className="brutal-btn px-4 py-2 text-sm font-mono font-black flex items-center gap-1.5 disabled:opacity-40"
           >
-            {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+            <Download className="w-4 h-4" />
+            <span>导出 WAV</span>
           </button>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={isMuted ? 0 : volume}
-            onChange={handleVolumeChange}
-            className="w-16 h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-          />
-        </div>
+        )}
       </div>
     </div>
   );

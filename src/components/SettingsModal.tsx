@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import { X, Key, Globe, Eye, EyeOff, CheckCircle2, AlertCircle, Loader2, Cpu } from 'lucide-react';
-import { AppSettings, ConnectionTestResult } from '../api/types';
+import { useState, useEffect } from 'react';
+import { X, Key, Globe, Eye, EyeOff, CheckCircle2, AlertCircle, Loader2, Cpu, Sparkles } from 'lucide-react';
+import { AppSettings, ConnectionTestResult, LlmDirectorModel } from '../api/types';
 import { testConnection } from '../api/gemini';
 
 interface SettingsModalProps {
@@ -15,10 +15,21 @@ export function SettingsModal({ isOpen, onClose, settings, onSave }: SettingsMod
   const [proxyUrl, setProxyUrl] = useState(settings.proxyUrl || 'http://127.0.0.1:7900');
   const [autoPlay, setAutoPlay] = useState(settings.autoPlay ?? true);
   const [defaultModel, setDefaultModel] = useState(settings.defaultModel || 'gemini-3.8-flash-tts');
+  const [llmModel, setLlmModel] = useState<LlmDirectorModel>(settings.llmModel || 'gemini-4-argon');
   const [showKey, setShowKey] = useState(false);
 
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setApiKey(settings.apiKey || '');
+      setProxyUrl(settings.proxyUrl || 'http://127.0.0.1:7900');
+      setAutoPlay(settings.autoPlay ?? true);
+      setDefaultModel(settings.defaultModel || 'gemini-3.8-flash-tts');
+      setLlmModel(settings.llmModel || 'gemini-4-argon');
+    }
+  }, [isOpen, settings]);
 
   if (!isOpen) return null;
 
@@ -43,43 +54,47 @@ export function SettingsModal({ isOpen, onClose, settings, onSave }: SettingsMod
       apiKey: apiKey.trim(),
       proxyUrl: proxyUrl.trim(),
       autoPlay,
-      defaultModel
+      defaultModel,
+      llmModel
     });
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="relative w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-[#09090B]/55 backdrop-blur-[2px] flex items-center justify-center p-4">
+      <div className="relative w-full max-w-lg brutal-box bg-[#FFFFFF] overflow-hidden animate-panel-enter">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/50">
-          <div className="flex items-center gap-2">
-            <h2 className="text-base font-semibold text-slate-100">系统与网络设置</h2>
+        <div className="flex items-center justify-between px-6 py-4 border-b-2 border-[#09090B] bg-[#F8F9FA]">
+          <div className="flex items-center gap-2.5">
+            <span className="px-2 py-0.5 bg-[#D97706] text-[#FFFFFF] border-[1.5px] border-[#09090B] font-mono text-xs font-black">
+              CONFIG
+            </span>
+            <h2 className="text-base font-black text-[#09090B]">系统与网络代理配置</h2>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition"
+            className="brutal-btn p-1.5"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Body */}
-        <div className="p-6 space-y-5">
+        <div className="p-6 space-y-5 bg-[#FFFFFF]">
           {/* Gemini API Key */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-300">
-                <Key className="w-3.5 h-3.5 text-indigo-400" />
+              <label className="flex items-center gap-1.5 text-xs font-black text-[#09090B]">
+                <Key className="w-3.5 h-3.5 text-[#D97706]" />
                 Google Gemini API Key
               </label>
               <a
                 href="https://aistudio.google.com/app/apikey"
                 target="_blank"
                 rel="noreferrer"
-                className="text-[11px] text-indigo-400 hover:underline"
+                className="text-[11px] font-mono font-bold text-[#D97706] hover:underline"
               >
-                获取 API Key
+                获取 API Key →
               </a>
             </div>
             <div className="relative">
@@ -87,13 +102,13 @@ export function SettingsModal({ isOpen, onClose, settings, onSave }: SettingsMod
                 type={showKey ? 'text' : 'password'}
                 value={apiKey}
                 onChange={e => setApiKey(e.target.value)}
-                placeholder="AIzaSy..."
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-slate-100 font-mono placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition"
+                placeholder="AIzaSy... 或 AQ...."
+                className="w-full brutal-input px-3.5 py-2 pr-10 text-sm font-mono font-bold"
               />
               <button
                 type="button"
                 onClick={() => setShowKey(!showKey)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-[#09090B]/60 hover:text-[#09090B]"
               >
                 {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
@@ -102,8 +117,8 @@ export function SettingsModal({ isOpen, onClose, settings, onSave }: SettingsMod
 
           {/* Network Proxy */}
           <div>
-            <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-300 mb-1.5">
-              <Globe className="w-3.5 h-3.5 text-indigo-400" />
+            <label className="flex items-center gap-1.5 text-xs font-black text-[#09090B] mb-1.5">
+              <Globe className="w-3.5 h-3.5 text-[#D97706]" />
               本地网络代理 (Proxy Server)
             </label>
             <input
@@ -111,103 +126,136 @@ export function SettingsModal({ isOpen, onClose, settings, onSave }: SettingsMod
               value={proxyUrl}
               onChange={e => setProxyUrl(e.target.value)}
               placeholder="http://127.0.0.1:7900"
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition"
+              className="w-full brutal-input px-3.5 py-2 text-sm font-mono font-bold"
             />
-            <p className="text-[11px] text-slate-500 mt-1">
+            <p className="text-[11px] font-mono font-bold text-[#09090B]/60 mt-1">
               默认优先连接 Clash Verge（7900 端口）或 Shadowrocket（1082 端口）
             </p>
           </div>
 
-          {/* Test Connection Button */}
-          <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/60 border border-slate-800">
-            <span className="text-xs text-slate-400">检测当前 API 密钥与代理网络连通度</span>
+          {/* Test Connection */}
+          <div className="flex items-center justify-between p-3 bg-[#F8F9FA] border-2 border-[#09090B]">
+            <span className="text-xs font-bold text-[#09090B]">检测 API 密钥与代理网络连通状态</span>
             <button
               onClick={handleTest}
               disabled={isTesting || !apiKey.trim()}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-indigo-300 border border-slate-700 transition disabled:opacity-50"
+              className="brutal-btn px-3 py-1.5 text-xs flex items-center gap-1.5 disabled:opacity-40"
             >
-              {isTesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+              {isTesting ? <Loader2 className="w-3.5 h-3.5 animate-spin text-[#D97706]" /> : null}
               {isTesting ? '正在探测...' : '测试连通性'}
             </button>
           </div>
 
-          {/* Test result feedback */}
           {testResult && (
             <div
-              className={`p-3 rounded-xl text-xs flex items-start gap-2 border ${
+              className={`p-3 text-xs font-bold flex items-start gap-2 border-2 border-[#09090B] ${
                 testResult.success
-                  ? 'bg-emerald-950/30 border-emerald-800/50 text-emerald-300'
-                  : 'bg-rose-950/30 border-rose-800/50 text-rose-300'
+                  ? 'bg-[#D97706]/15 text-[#09090B]'
+                  : 'bg-[#09090B] text-[#FFFFFF]'
               }`}
             >
               {testResult.success ? (
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                <CheckCircle2 className="w-4 h-4 text-[#D97706] flex-shrink-0 mt-0.5" />
               ) : (
-                <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-0.5" />
+                <AlertCircle className="w-4 h-4 text-[#D97706] flex-shrink-0 mt-0.5" />
               )}
               <div>{testResult.message}</div>
             </div>
           )}
 
-          {/* Model selection */}
+          {/* LLM Director Engine Selection */}
           <div>
-            <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-300 mb-1.5">
-              <Cpu className="w-3.5 h-3.5 text-indigo-400" />
-              默认语音合成模型 (TTS Engine)
+            <label className="flex items-center gap-1.5 text-xs font-black text-[#09090B] mb-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-[#D97706]" />
+              AI 导演与台本扩写大模型 (LLM Director Engine)
             </label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() => setLlmModel('gemini-4-argon')}
+                className={`p-3 text-left border-2 border-[#09090B] transition ${
+                  llmModel === 'gemini-4-argon'
+                    ? 'bg-[#D97706] text-[#FFFFFF] shadow-[3px_3px_0_#09090B]'
+                    : 'bg-[#F8F9FA] text-[#09090B]'
+                }`}
+              >
+                <div className="text-xs font-black font-mono">Gemini 4 Argon</div>
+                <div className="text-[10px] font-bold opacity-85 mt-0.5">旗舰推理引擎 · 1M 上下文深度创作</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setLlmModel('gemini-3.8-flash')}
+                className={`p-3 text-left border-2 border-[#09090B] transition ${
+                  llmModel === 'gemini-3.8-flash'
+                    ? 'bg-[#D97706] text-[#FFFFFF] shadow-[3px_3px_0_#09090B]'
+                    : 'bg-[#F8F9FA] text-[#09090B]'
+                }`}
+              >
+                <div className="text-xs font-black font-mono">Gemini 3.8 Flash</div>
+                <div className="text-[10px] font-bold opacity-85 mt-0.5">高速轻量模型 · 快速润色扩写</div>
+              </button>
+            </div>
+          </div>
+
+          {/* TTS Model Selection */}
+          <div>
+            <label className="flex items-center gap-1.5 text-xs font-black text-[#09090B] mb-1.5">
+              <Cpu className="w-3.5 h-3.5 text-[#D97706]" />
+              默认语音合成引擎 (TTS Engine)
+            </label>
+            <div className="grid grid-cols-2 gap-2.5">
               <button
                 type="button"
                 onClick={() => setDefaultModel('gemini-3.8-flash-tts')}
-                className={`p-3 rounded-xl border text-left transition ${
+                className={`p-3 text-left border-2 border-[#09090B] transition ${
                   defaultModel === 'gemini-3.8-flash-tts'
-                    ? 'border-indigo-500 bg-indigo-950/30 text-indigo-200'
-                    : 'border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-700'
+                    ? 'bg-[#D97706] text-[#FFFFFF] shadow-[3px_3px_0_#09090B]'
+                    : 'bg-[#F8F9FA] text-[#09090B]'
                 }`}
               >
-                <div className="text-xs font-semibold">Gemini 3.8 Flash TTS</div>
-                <div className="text-[10px] text-slate-500 mt-0.5">旗舰级高保真·顶级表演力</div>
+                <div className="text-xs font-black font-mono">Gemini 3.8 Flash TTS</div>
+                <div className="text-[10px] font-bold opacity-85 mt-0.5">旗舰高保真 · 顶级表演力</div>
               </button>
               <button
                 type="button"
                 onClick={() => setDefaultModel('gemini-3.8-flash-lite-tts')}
-                className={`p-3 rounded-xl border text-left transition ${
+                className={`p-3 text-left border-2 border-[#09090B] transition ${
                   defaultModel === 'gemini-3.8-flash-lite-tts'
-                    ? 'border-indigo-500 bg-indigo-950/30 text-indigo-200'
-                    : 'border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-700'
+                    ? 'bg-[#D97706] text-[#FFFFFF] shadow-[3px_3px_0_#09090B]'
+                    : 'bg-[#F8F9FA] text-[#09090B]'
                 }`}
               >
-                <div className="text-xs font-semibold">Gemini 3.8 Flash-Lite TTS</div>
-                <div className="text-[10px] text-slate-500 mt-0.5">极速响应·高吞吐低延迟</div>
+                <div className="text-xs font-black font-mono">Gemini 3.8 Flash-Lite</div>
+                <div className="text-[10px] font-bold opacity-85 mt-0.5">极速响应 · 高吞吐低延迟</div>
               </button>
             </div>
           </div>
 
           {/* Auto play toggle */}
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-slate-300">合成完成后自动播放试听</span>
+          <div className="flex items-center justify-between pt-1">
+            <span className="text-xs font-black text-[#09090B]">合成完成后自动播放试听</span>
             <input
               type="checkbox"
               checked={autoPlay}
               onChange={e => setAutoPlay(e.target.checked)}
-              className="w-4 h-4 rounded bg-slate-950 border-slate-700 text-indigo-600 focus:ring-indigo-500 accent-indigo-600 cursor-pointer"
+              className="w-4 h-4 border-2 border-[#09090B] accent-[#D97706] cursor-pointer"
             />
           </div>
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-800 bg-slate-950/50">
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t-2 border-[#09090B] bg-[#F8F9FA]">
           <button
             onClick={onClose}
-            className="px-4 py-2 rounded-xl text-xs font-medium text-slate-300 hover:bg-slate-800 transition"
+            className="brutal-btn px-4 py-2 text-xs"
           >
             取消
           </button>
           <button
             onClick={handleSave}
-            className="px-5 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30 transition"
+            className="brutal-btn-amber px-5 py-2 text-xs"
           >
-            保存配置
+            ★ 保存配置
           </button>
         </div>
       </div>

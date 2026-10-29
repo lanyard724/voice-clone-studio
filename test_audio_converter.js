@@ -7,12 +7,14 @@ async function runTests() {
 
   const {
     encodeWAV,
+    ensureWavBase64,
     arrayBufferToBase64,
     base64ToBlob,
     formatAudioTime,
     TARGET_SAMPLE_RATE,
     TARGET_CHANNELS
   } = converter;
+  const core = await import('./server/core.ts');
 
   // 1. Verify Target Constants
   assert.strictEqual(TARGET_SAMPLE_RATE, 24000, 'Target sample rate must be 24000Hz');
@@ -115,6 +117,23 @@ async function runTests() {
   assert.strictEqual(formatAudioTime(125), '02:05');
   assert.strictEqual(formatAudioTime(3600), '60:00');
   console.log('[PASS] formatAudioTime boundary conditions pass.');
+
+  // 6. Test ensureWavBase64 & server/core.ts ensureWavBuffer on headless PCM
+  const rawPcm = new Uint8Array(4800);
+  const rawPcmB64 = arrayBufferToBase64(rawPcm.buffer);
+  const wrappedB64 = ensureWavBase64(rawPcmB64);
+  const wrappedBin = Buffer.from(wrappedB64, 'base64');
+  assert.strictEqual(wrappedBin.length, 44 + 4800, 'Wrapped PCM must add 44-byte RIFF header');
+  assert.strictEqual(wrappedBin.toString('ascii', 0, 4), 'RIFF');
+  assert.strictEqual(ensureWavBase64(wrappedB64), wrappedB64, 'Already-wrapped WAV must be idempotent');
+
+  const coreWrapped = core.ensureWavBuffer(Buffer.from(rawPcm));
+  assert.strictEqual(coreWrapped.length, 44 + 4800);
+  assert.strictEqual(coreWrapped.toString('ascii', 0, 4), 'RIFF');
+
+  const chunks = core.splitTextIntoChunks('第一章 开始\n这是第一段测试句子。这是第二段测试句子。', 15);
+  assert.ok(chunks.length >= 2, 'splitTextIntoChunks splits by chapter and length');
+  console.log('[PASS] ensureWavBase64, server/core.ts ensureWavBuffer, and splitTextIntoChunks pass.');
 
   console.log('\n========================================');
   console.log('ALL REAL AUDIO CONVERTER TESTS PASSED!');

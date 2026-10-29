@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { Play, Pause, Star, Trash2, Edit2, Check, X, Sparkles, Volume2 } from 'lucide-react';
+import { Play, Pause, Star, Trash2, Edit2, Check, X, Volume2 } from 'lucide-react';
 import { VoiceItem } from '../api/types';
 
 interface VoiceCardProps {
@@ -51,13 +51,10 @@ export function VoiceCard({
   return (
     <div
       onClick={() => onSelect(voice.id)}
-      className={`relative rounded-xl border p-4 transition-all cursor-pointer flex flex-col justify-between ${
-        isSelected
-          ? 'border-indigo-500 bg-indigo-950/20 shadow-lg shadow-indigo-500/10'
-          : 'border-slate-800 bg-slate-900/60 hover:border-slate-700 hover:bg-slate-900/90'
+      className={`relative brutal-card brutal-card-interactive p-5 cursor-pointer flex flex-col justify-between ${
+        isSelected ? 'bg-[#D97706]/14 border-[#09090B]' : 'bg-[#FFFFFF]'
       }`}
     >
-      {/* Hidden sample audio element */}
       {voice.sampleAudioUrl && (
         <audio
           ref={audioRef}
@@ -66,67 +63,66 @@ export function VoiceCard({
         />
       )}
 
-      {/* Top Header */}
       <div>
-        <div className="flex items-start justify-between gap-2 mb-2">
-          {/* Badge */}
-          <div className="flex items-center gap-1.5 flex-wrap">
+        <div className="flex items-start justify-between gap-2 mb-3">
+          <div className="flex items-center gap-2 flex-wrap font-mono">
             {voice.type === 'replicated' ? (
-              <span className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
-                <Sparkles className="w-3 h-3" />
-                克隆声线
+              <span className="text-xs font-black px-2.5 py-1 bg-[#D97706] text-[#FFFFFF] border-2 border-[#09090B]">
+                CLONED · 专属克隆
               </span>
             ) : (
-              <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-medium">
-                官方预设
+              <span className="text-xs font-black px-2.5 py-1 bg-[#F8F9FA] text-[#09090B] border-2 border-[#09090B]">
+                PREBUILT · 官方预设
               </span>
             )}
             {voice.isFavorite && (
-              <span className="text-amber-400 text-xs">★ 收藏</span>
+              <span className="text-xs font-black px-2 py-1 bg-[#09090B] text-[#D97706] border-2 border-[#09090B]">
+                ★ 收藏
+              </span>
             )}
           </div>
 
-          {/* Action icons */}
-          <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
             <button
               onClick={() => onToggleFavorite(voice.id)}
-              className={`p-1 rounded hover:bg-slate-800 transition ${
-                voice.isFavorite ? 'text-amber-400' : 'text-slate-500 hover:text-slate-300'
+              className={`p-1.5 border-2 border-[#09090B] transition ${
+                voice.isFavorite
+                  ? 'bg-[#D97706] text-[#FFFFFF]'
+                  : 'bg-[#F8F9FA] text-[#09090B] hover:bg-[#D97706]/20'
               }`}
               title="收藏声线"
             >
-              <Star className="w-3.5 h-3.5 fill-current" />
+              <Star className="w-4 h-4 fill-current" />
             </button>
 
             {voice.type === 'replicated' && (
               <>
                 <button
                   onClick={() => setIsEditing(true)}
-                  className="p-1 rounded text-slate-500 hover:text-slate-300 hover:bg-slate-800 transition"
+                  className="p-1.5 border-2 border-[#09090B] bg-[#F8F9FA] text-[#09090B] hover:bg-[#D97706]/20 transition"
                   title="重命名声线"
                 >
-                  <Edit2 className="w-3.5 h-3.5" />
+                  <Edit2 className="w-4 h-4" />
                 </button>
                 <button
                   onClick={() => setIsConfirmingDelete(true)}
-                  className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition"
+                  className="p-1.5 border-2 border-[#09090B] bg-[#F8F9FA] text-[#09090B] hover:bg-[#09090B] hover:text-[#FFFFFF] transition"
                   title="删除声线"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
+                  <Trash2 className="w-4 h-4" />
                 </button>
               </>
             )}
           </div>
         </div>
 
-        {/* Title or Inline Edit */}
         {isEditing ? (
-          <div className="flex items-center gap-1 my-1" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center gap-1.5 my-2" onClick={e => e.stopPropagation()}>
             <input
               type="text"
               value={editName}
               onChange={e => setEditName(e.target.value)}
-              className="flex-1 bg-slate-950 border border-indigo-500 rounded px-2 py-1 text-xs text-slate-100 focus:outline-none"
+              className="flex-1 brutal-input px-3 py-1.5 text-sm font-bold"
               autoFocus
               onKeyDown={e => {
                 if (e.key === 'Enter') handleSaveRename();
@@ -135,39 +131,40 @@ export function VoiceCard({
             />
             <button
               onClick={handleSaveRename}
-              className="p-1 rounded bg-indigo-600 text-white hover:bg-indigo-500"
+              className="p-2 border-2 border-[#09090B] bg-[#D97706] text-[#FFFFFF]"
             >
-              <Check className="w-3.5 h-3.5" />
+              <Check className="w-4 h-4" />
             </button>
             <button
               onClick={() => setIsEditing(false)}
-              className="p-1 rounded bg-slate-800 text-slate-400 hover:bg-slate-700"
+              className="p-2 border-2 border-[#09090B] bg-[#F8F9FA] text-[#09090B]"
             >
-              <X className="w-3.5 h-3.5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
         ) : (
-          <h3 className="font-semibold text-sm text-slate-100 truncate mb-1">
+          <h3 className="font-black text-lg text-[#09090B] truncate mb-1">
             {voice.displayName}
           </h3>
         )}
 
-        {/* ID snippet & description */}
-        <div className="text-[11px] font-mono text-slate-500 truncate mb-2">
+        <div className="text-xs font-mono font-bold text-[#09090B]/65 truncate mb-2.5">
           ID: {voice.id}
         </div>
 
         {voice.description && (
-          <p className="text-xs text-slate-400 line-clamp-2 mb-3">
+          <p className="text-sm font-medium text-[#09090B]/80 line-clamp-2 mb-3">
             {voice.description}
           </p>
         )}
 
-        {/* Tags */}
         {voice.tags && voice.tags.length > 0 && (
-          <div className="flex items-center gap-1 flex-wrap mb-3">
+          <div className="flex items-center gap-1.5 flex-wrap mb-3 font-mono">
             {voice.tags.map((tag, i) => (
-              <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800/80 text-slate-400 border border-slate-700/50">
+              <span
+                key={i}
+                className="text-xs font-bold px-2 py-0.5 bg-[#F8F9FA] text-[#09090B] border-[1.5px] border-[#09090B]"
+              >
                 #{tag}
               </span>
             ))}
@@ -175,28 +172,27 @@ export function VoiceCard({
         )}
       </div>
 
-      {/* Delete confirmation layer */}
       {isConfirmingDelete && (
         <div
-          className="absolute inset-0 bg-slate-950/95 rounded-xl p-4 flex flex-col justify-center items-center gap-3 z-10 border border-rose-900/60"
+          className="absolute inset-0 bg-[#FFFFFF] p-5 flex flex-col justify-center items-center gap-3 z-10 border-2 border-[#09090B]"
           onClick={e => e.stopPropagation()}
         >
-          <div className="text-xs text-rose-300 font-medium text-center">
-            确定删除该声线吗？此操作将同步销毁云端与本地声纹模型。
+          <div className="text-sm text-[#09090B] font-black text-center">
+            确定删除该声线吗？此操作将同步移除本地声纹记录。
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <button
               onClick={() => {
                 onDelete(voice.id);
                 setIsConfirmingDelete(false);
               }}
-              className="px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded text-xs font-semibold"
+              className="brutal-btn-amber px-4 py-1.5 text-sm"
             >
               确认删除
             </button>
             <button
               onClick={() => setIsConfirmingDelete(false)}
-              className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs"
+              className="brutal-btn px-4 py-1.5 text-sm"
             >
               取消
             </button>
@@ -204,32 +200,29 @@ export function VoiceCard({
         </div>
       )}
 
-      {/* Bottom Bar: Sample button and Selection Indicator */}
-      <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 mt-1">
+      <div className="flex items-center justify-between pt-3 border-t-2 border-[#09090B] mt-2">
         {voice.sampleAudioUrl ? (
           <button
             onClick={toggleSample}
-            className="flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 py-1 px-2 rounded hover:bg-indigo-950/40 transition"
+            className="brutal-btn flex items-center gap-1.5 text-sm py-1.5 px-3"
           >
-            {isPlayingSample ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-            <span>试听录音样本</span>
+            {isPlayingSample ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+            <span>试听样本</span>
           </button>
         ) : (
-          <div className="flex items-center gap-1 text-[11px] text-slate-500">
-            <Volume2 className="w-3.5 h-3.5" />
-            <span>无采样切片</span>
+          <div className="flex items-center gap-1.5 text-xs font-mono font-bold text-[#09090B]/65">
+            <Volume2 className="w-4 h-4" />
+            <span>24kHz PCM</span>
           </div>
         )}
 
         <button
           onClick={() => onSelect(voice.id)}
-          className={`text-xs px-2.5 py-1 rounded font-medium transition ${
-            isSelected
-              ? 'bg-indigo-600 text-white'
-              : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+          className={`text-sm px-3.5 py-1.5 font-mono ${
+            isSelected ? 'brutal-btn-amber' : 'brutal-btn'
           }`}
         >
-          {isSelected ? '已选用' : '选用声线'}
+          {isSelected ? '★ 当前选用' : '选用声线 →'}
         </button>
       </div>
     </div>

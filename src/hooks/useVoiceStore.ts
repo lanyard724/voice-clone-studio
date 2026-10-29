@@ -11,7 +11,8 @@ export function useVoiceStore() {
     apiKey: '',
     proxyUrl: 'http://127.0.0.1:7900',
     autoPlay: true,
-    defaultModel: 'gemini-3.8-flash-tts'
+    defaultModel: 'gemini-3.8-flash-tts',
+    llmModel: 'gemini-4-argon'
   });
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
@@ -22,24 +23,15 @@ export function useVoiceStore() {
     async function init() {
       setIsLoading(true);
       try {
-        const [loadedSettings, loadedVoices, loadedHistory] = await Promise.all([
-          storage.getSettings(),
-          storage.getVoices(),
-          storage.getHistory()
-        ]);
+        const { settings: loadedSettings, voices: loadedVoices, history: loadedHistory } =
+          await storage.loadAllState();
         if (!mounted) return;
         setSettings(loadedSettings);
-
-        // Sanitize legacy dummy timestamp voices (e.g. voice_1750012541213)
-        const sanitizedVoices = loadedVoices.filter(v => !/^voice_\d{10,}$/.test(v.id));
-        if (sanitizedVoices.length !== loadedVoices.length) {
-          storage.saveCustomVoices(sanitizedVoices);
-        }
-
-        setVoices(sanitizedVoices);
+        setVoices(loadedVoices);
         setHistory(loadedHistory);
-        if (sanitizedVoices.length > 0) {
-          setSelectedVoiceId(sanitizedVoices[0].id);
+        if (loadedVoices.length > 0) {
+          const custom = loadedVoices.find(v => v.type === 'replicated');
+          setSelectedVoiceId(custom ? custom.id : loadedVoices[0].id);
         }
       } catch (err) {
         console.error('Failed to initialize voice store', err);
@@ -184,6 +176,18 @@ export function useVoiceStore() {
     });
   }, []);
 
+  const reloadFromBackend = useCallback(async () => {
+    try {
+      const { settings: loadedSettings, voices: loadedVoices, history: loadedHistory } =
+        await storage.loadAllState();
+      setSettings(loadedSettings);
+      setVoices(loadedVoices);
+      setHistory(loadedHistory);
+    } catch (err) {
+      console.error('Failed to reload from backend', err);
+    }
+  }, []);
+
   return {
     voices,
     selectedVoiceId,
@@ -200,6 +204,7 @@ export function useVoiceStore() {
     removeVoice,
     addHistoryRecord,
     clearHistory,
-    deleteHistoryRecord
+    deleteHistoryRecord,
+    reloadFromBackend
   };
 }

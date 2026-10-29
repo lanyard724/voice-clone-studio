@@ -5,8 +5,8 @@ import { formatAudioTime } from '../utils/audioConverter';
 
 interface AudioRecorderProps {
   label: string;
-  minDuration?: number; // In seconds
-  maxDuration?: number; // In seconds
+  minDuration?: number;
+  maxDuration?: number;
   recommendedText?: string;
   onAudioReady: (base64: string, duration: number, dataUrl: string) => void;
   onClear: () => void;
@@ -53,7 +53,6 @@ export function AudioRecorder({
     stopRecording();
   };
 
-  // Watch for when recording finishes and passes to parent, guarded against re-render loops
   useEffect(() => {
     if (!isRecording && !isConverting && audioBase64 && dataUrl && duration > 0) {
       if (lastReportedBase64Ref.current !== audioBase64) {
@@ -95,7 +94,6 @@ export function AudioRecorder({
     }
   };
 
-  // Determine duration quality status
   const currentDuration = isReady ? readyDuration : duration;
   const isTooShort = currentDuration > 0 && currentDuration < minDuration;
   const isOptimal = currentDuration >= minDuration && currentDuration <= maxDuration;
@@ -103,99 +101,94 @@ export function AudioRecorder({
   const activePreviewUrl = dataUrl || readyDataUrl;
 
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 transition-all hover:border-slate-700">
+    <div className="brutal-card p-4 bg-[#FFFFFF]">
       <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <span className="font-semibold text-sm text-slate-200">{label}</span>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-black text-xs text-[#09090B]">{label}</span>
           {minDuration > 0 && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400">
+            <span className="text-[11px] font-mono font-bold px-2 py-0.5 bg-[#F8F9FA] text-[#09090B] border border-[#09090B]">
               建议时长：{minDuration} 至 {maxDuration} 秒
             </span>
           )}
         </div>
         {isReady && (
-          <span className="flex items-center gap-1 text-xs text-emerald-400 font-medium bg-emerald-950/40 border border-emerald-800/50 px-2 py-0.5 rounded-full">
+          <span className="flex items-center gap-1 text-xs font-mono font-black bg-[#D97706] text-[#FFFFFF] border-[1.5px] border-[#09090B] px-2.5 py-0.5">
             <CheckCircle2 className="w-3.5 h-3.5" />
-            已就绪 ({readyDuration.toFixed(1)}s)
+            READY ({readyDuration.toFixed(1)}s)
           </span>
         )}
       </div>
 
       {recommendedText && (
-        <div className="mb-3 p-3 rounded-lg bg-indigo-950/30 border border-indigo-800/40 text-xs text-indigo-200 leading-relaxed">
-          <div className="font-medium text-indigo-300 mb-1">【法定授权朗读文案】：</div>
-          <div className="select-text bg-slate-950/50 p-2 rounded border border-indigo-900/40 font-mono text-slate-100">
+        <div className="mb-3 p-3 bg-[#D97706]/12 border-2 border-[#09090B] text-xs text-[#09090B] leading-relaxed">
+          <div className="font-black text-[#D97706] mb-1">【法定授权朗读文案】：</div>
+          <div className="select-text bg-[#FFFFFF] p-2.5 border-[1.5px] border-[#09090B] font-mono font-bold text-[#09090B]">
             {recommendedText}
           </div>
         </div>
       )}
 
-      {/* Recording in progress feedback */}
       {isRecording && (
-        <div className="mb-3 p-3 rounded-lg bg-rose-950/20 border border-rose-800/50 flex flex-col gap-2">
+        <div className="mb-3 p-3 bg-[#D97706]/15 border-2 border-[#09090B] flex flex-col gap-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
-              <span className="text-xs font-medium text-rose-300">正在录音中...</span>
+              <span className="w-2.5 h-2.5 bg-[#D97706] border border-[#09090B] animate-ping" />
+              <span className="text-xs font-black text-[#09090B]">● 正在采集麦克风声纹...</span>
             </div>
-            <span className="text-sm font-mono font-bold text-rose-200">
+            <span className="text-sm font-mono font-black text-[#D97706]">
               {formatAudioTime(duration)}
             </span>
           </div>
 
-          {/* Volume dynamic bar */}
-          <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden flex items-center">
+          <div className="h-3 w-full bg-[#FFFFFF] border-[1.5px] border-[#09090B] overflow-hidden flex items-center">
             <div
-              className="h-full bg-gradient-to-r from-emerald-500 via-amber-500 to-rose-500 transition-all duration-75 rounded-full"
-              style={{ width: `${Math.max(5, volume * 100)}%` }}
+              className="h-full bg-[#D97706] transition-all duration-75"
+              style={{ width: `${Math.max(6, volume * 100)}%` }}
             />
           </div>
         </div>
       )}
 
-      {/* Converting feedback */}
       {isConverting && (
-        <div className="mb-3 p-2.5 rounded-lg bg-indigo-950/30 border border-indigo-800/50 flex items-center gap-2 text-xs text-indigo-300">
-          <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+        <div className="mb-3 p-2.5 bg-[#F8F9FA] border-2 border-[#09090B] flex items-center gap-2 text-xs font-bold text-[#09090B]">
+          <Loader2 className="w-4 h-4 animate-spin text-[#D97706]" />
           <span>正在进行 24kHz 单声道 16-bit PCM 音频重采样标准化...</span>
         </div>
       )}
 
-      {/* Duration status tag */}
       {currentDuration > 0 && !isRecording && !isConverting && (
-        <div className="mb-2 text-xs">
+        <div className="mb-2 text-xs font-mono font-bold">
           {isOptimal && (
-            <span className="text-emerald-400">✓ 时长符合最佳标准（{currentDuration.toFixed(1)} 秒）</span>
+            <span className="text-[#D97706]">★ 时长符合最佳标准（{currentDuration.toFixed(1)} 秒）</span>
           )}
           {isTooShort && (
-            <span className="text-amber-400">! 录音略短（不足 {minDuration} 秒），可能影响声纹模型精度</span>
+            <span className="text-[#09090B]">! 录音略短（不足 {minDuration} 秒），建议重录以提高声纹精度</span>
           )}
           {isTooLong && (
-            <span className="text-amber-400">! 录音超过 {maxDuration} 秒，将自动裁剪前段特征</span>
+            <span className="text-[#09090B]">! 录音超过 {maxDuration} 秒，将自动截取前段特征</span>
           )}
         </div>
       )}
 
       {error && (
-        <div className="mb-3 text-xs text-rose-400 bg-rose-950/30 p-2 rounded border border-rose-900/40">
+        <div className="mb-3 text-xs font-bold text-[#09090B] bg-[#D97706]/20 p-2.5 border-2 border-[#09090B]">
           {error}
         </div>
       )}
 
-      {/* Operation Actions */}
       <div className="flex items-center gap-2 mt-2">
         {!isReady && !isRecording && !isConverting && (
           <>
             <button
               onClick={handleStart}
-              className="flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-md transition"
+              className="flex-1 brutal-btn-amber flex items-center justify-center gap-2 py-2 px-3 text-xs"
             >
               <Mic className="w-4 h-4" />
               开始麦克风录音
             </button>
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1.5 py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition"
+              className="brutal-btn flex items-center gap-1.5 py-2 px-3 text-xs"
             >
               <Upload className="w-3.5 h-3.5" />
               本地文件上传
@@ -213,9 +206,9 @@ export function AudioRecorder({
         {isRecording && (
           <button
             onClick={handleStop}
-            className="flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-rose-400 border border-rose-600/50 text-xs font-semibold shadow-md transition animate-pulse"
+            className="flex-1 brutal-btn-ink flex items-center justify-center gap-2 py-2 px-3 text-xs animate-tube-pulse"
           >
-            <Square className="w-4 h-4 fill-rose-500 text-rose-500" />
+            <Square className="w-4 h-4 fill-[#D97706] text-[#D97706]" />
             完成录音
           </button>
         )}
@@ -233,7 +226,7 @@ export function AudioRecorder({
             <button
               onClick={togglePreview}
               disabled={!activePreviewUrl}
-              className="flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-xs font-medium transition disabled:opacity-50"
+              className="flex-1 brutal-btn flex items-center justify-center gap-2 py-2 px-3 text-xs disabled:opacity-50"
             >
               {isPlayingPreview ? (
                 <>
@@ -241,13 +234,13 @@ export function AudioRecorder({
                 </>
               ) : (
                 <>
-                  <Play className="w-3.5 h-3.5" /> 试听录音
+                  <Play className="w-3.5 h-3.5" /> 试听录音样本
                 </>
               )}
             </button>
             <button
               onClick={handleClear}
-              className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-rose-400 transition"
+              className="brutal-btn p-2 text-[#09090B]"
               title="清除重录"
             >
               <Trash2 className="w-4 h-4" />

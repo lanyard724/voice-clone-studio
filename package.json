@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "electron:dev": "electron .",
+    "cli": "node cli.mjs",
+    "mcp": "node mcp-server.mjs",
     "test": "node test_audio_converter.js",
     "build": "tsc && vite build && tsc -p tsconfig.electron.json"
   },

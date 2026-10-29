@@ -5,7 +5,7 @@ import {
   SynthesizePayload,
   ConnectionTestResult
 } from './types';
-import { base64ToBlob } from '../utils/audioConverter';
+import { base64ToBlob, ensureWavBase64 } from '../utils/audioConverter';
 
 const API_BASE = 'https://generativelanguage.googleapis.com';
 
@@ -14,10 +14,12 @@ const API_BASE = 'https://generativelanguage.googleapis.com';
  * or falls back to browser fetch.
  */
 async function apiFetch(endpoint: string, options: RequestInit): Promise<Response> {
+  const fullUrl = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint}`;
+
   if (window.electronAPI?.request) {
     try {
       const result = await window.electronAPI.request({
-        url: endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint}`,
+        url: fullUrl,
         method: options.method || 'GET',
         headers: (options.headers as Record<string, string>) || {},
         body: options.body as string | undefined
@@ -28,10 +30,36 @@ async function apiFetch(endpoint: string, options: RequestInit): Promise<Respons
         headers: result.headers
       });
     } catch (err) {
-      console.warn('IPC request failed, fallback to native fetch', err);
+      console.warn('IPC request failed, fallback to local bridge', err);
     }
   }
-  const fullUrl = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint}`;
+
+  // Try Vite / Node local proxy bridge first (penetrates 127.0.0.1:7900 in browser mode)
+  try {
+    const bridgeRes = await fetch('/api/proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: fullUrl,
+        method: options.method || 'GET',
+        headers: (options.headers as Record<string, string>) || {},
+        body: options.body as string | undefined
+      })
+    });
+    if (bridgeRes.ok) {
+      const result = await bridgeRes.json();
+      if (typeof result?.status === 'number') {
+        return new Response(result.body, {
+          status: result.status,
+          statusText: result.statusText || '',
+          headers: result.headers || {}
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('Local bridge proxy unavailable, fallback to browser native fetch', err);
+  }
+
   return await fetch(fullUrl, options);
 }
 
@@ -235,15 +263,17 @@ export async function listReplicatedVoices(apiKey: string): Promise<VoiceItem[]>
     return rawList
       .map((v: any) => {
         const item = v.voice || v;
+        if (item.type === 'prebuilt') return null;
         const id = extractVoiceId(item);
         if (!id) return null;
+        if (!item.type && !id.startsWith('voice_') && !id.startsWith('voicekey_')) return null;
         const displayName = item.display_name || item.displayName || item.name || id;
         return {
           id,
           name: item.name || `voices/${id}`,
           displayName: displayName,
           type: 'replicated' as const,
-          createTime: item.create_time || item.createTime || new Date().toISOString(),
+          createTime: item.create_time || item.createTime || item.expire_time || new Date().toISOString(),
           tags: ['云端同步', '克隆声线']
         };
       })
@@ -273,24 +303,27 @@ export async function deleteReplicatedVoice(apiKey: string, voiceId: string): Pr
 }
 
 /**
- * LLM Director Mode using Gemini 3.8 Flash
+ * LLM Director Mode using Gemini 4 Argon (with optional model selection)
  * Transforms input draft into cinema-grade speech script with vocal cues and speech_metadata style
  */
 export async function directScriptWithLLM(
   apiKey: string,
   rawText: string,
   targetLanguage: string = 'zh-CN',
-  moodStyle: string = '自然生动'
+  moodStyle: string = '自然生动',
+  llmModel: string = 'gemini-4-argon'
 ): Promise<DirectorResult> {
   if (!apiKey) throw new Error('API Key 未配置');
   if (!rawText.trim()) throw new Error('文案内容不能为空');
+
+  const modelToUse = llmModel.trim() || 'gemini-4-argon';
 
   const systemPrompt = `你是一位好莱坞录音棚级语音配音导演。你的任务是将用户的原始草稿扩写润色为富有表现力、真实可感的有声台词。
 要求：
 1. 目标语言：${targetLanguage}
 2. 情感氛围风格：${moodStyle}
 3. 声音表现力增强：在台词中适度且精准地插入 Gemini 3.8 Flash TTS 原生支持的发音标记：
-   - 语气词与停顿：<laugh>（笑声）、<sigh>（叹气）、<gasp>（倒吸凉气）、<cough>（轻咳）、<throat-clearing>（清嗓）、<short pause>（短顿 0.3s）、<medium pause>（中顿 0.7s）。
+   - 语气词与停顿：[laugh]（笑声）、[sigh]（叹气）、[gasp]（倒吸凉气）、[cough]（轻咳）、[throat-clearing]（清嗓）、[short pause]（短顿 0.3s）、[medium pause]（中顿 0.7s）、[whispering]（耳语）。
    - 注意：绝不要滥用，在自然呼吸与情感转折处恰到好处地添加。
 4. 生成结构化指导：
    - enhanced_text: 润色扩写并已插入标记的最终台词文本。
@@ -306,7 +339,7 @@ export async function directScriptWithLLM(
   "director_notes": "..."
 }`;
 
-  const res = await apiFetch(`/v1beta/models/gemini-3.8-flash:generateContent?key=${encodeURIComponent(apiKey)}`, {
+  const res = await apiFetch(`/v1beta/models/${encodeURIComponent(modelToUse)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -325,29 +358,35 @@ export async function directScriptWithLLM(
 
   if (!res.ok) {
     const errJson = await res.json().catch(() => ({}));
-    throw new Error(errJson?.error?.message || `导演处理失败 HTTP ${res.status}`);
+    throw new Error(errJson?.error?.message || `导演处理失败 (${modelToUse}) HTTP ${res.status}`);
   }
 
   const data = await res.json();
-  const textContent = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  const parts: any[] = data?.candidates?.[0]?.content?.parts || [];
+  const answerPart = [...parts].reverse().find(p => p && typeof p.text === 'string' && !p.thought) || parts[0];
+  const textContent = answerPart?.text;
   if (!textContent) {
     throw new Error('未收到导演生成结果');
   }
 
   try {
-    const parsed = JSON.parse(textContent);
+    const cleanedJson = String(textContent)
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
+    const parsed = JSON.parse(cleanedJson);
     return {
       enhancedText: parsed.enhanced_text || rawText,
       targetLanguage: parsed.target_language || targetLanguage,
       speechStyle: parsed.speech_style || moodStyle,
-      directorNotes: parsed.director_notes || ''
+      directorNotes: parsed.director_notes || `由 ${modelToUse} 扩写生成`
     };
   } catch {
     return {
-      enhancedText: textContent.trim(),
+      enhancedText: String(textContent).trim(),
       targetLanguage,
       speechStyle: moodStyle,
-      directorNotes: '由 Gemini 3.8 Flash 直接生成'
+      directorNotes: `由 ${modelToUse} 直接生成`
     };
   }
 }
@@ -474,8 +513,9 @@ export async function synthesizeSpeech(
       data = JSON.parse(rawText);
     } catch {}
 
-    const audioBase64 = extractAudioFromInteractionsData(data);
-    if (audioBase64) {
+    const rawAudioBase64 = extractAudioFromInteractionsData(data);
+    if (rawAudioBase64) {
+      const audioBase64 = ensureWavBase64(rawAudioBase64);
       const duration = await calculateAudioDuration(audioBase64);
       return { audioBase64, duration };
     }
@@ -539,9 +579,10 @@ export async function synthesizeSpeech(
 
     const genData = await genRes.json();
     const part = genData?.candidates?.[0]?.content?.parts?.[0];
-    const audioBase64 = part?.inlineData?.data;
+    const rawAudioBase64 = part?.inlineData?.data;
 
-    if (audioBase64) {
+    if (rawAudioBase64) {
+      const audioBase64 = ensureWavBase64(rawAudioBase64);
       const duration = await calculateAudioDuration(audioBase64);
       return { audioBase64, duration };
     }

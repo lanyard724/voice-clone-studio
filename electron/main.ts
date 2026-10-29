@@ -13,7 +13,8 @@ try {
         apiKey: '',
         proxyUrl: 'http://127.0.0.1:7900',
         autoPlay: true,
-        defaultModel: 'gemini-3.8-flash-tts'
+        defaultModel: 'gemini-3.8-flash-tts',
+        llmModel: 'gemini-4-argon'
       },
       voices: [],
       history: []
@@ -23,13 +24,13 @@ try {
   console.warn('electron-store init failed, using filesystem json fallback', err);
 }
 
-// Filesystem fallback path
+// Shared database path aligned with Vite Bridge & CLI (data/studio_db.json)
 function getFallbackDbPath(): string {
-  const dir = app.getPath('userData');
+  const dir = path.resolve(__dirname, '../data');
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  return path.join(dir, 'voice_studio_db.json');
+  return path.join(dir, 'studio_db.json');
 }
 
 function readFallbackDb(): any {
